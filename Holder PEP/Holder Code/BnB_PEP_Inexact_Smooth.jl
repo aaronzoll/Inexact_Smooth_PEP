@@ -81,20 +81,6 @@ function feasible_h_generator(N, L; step_size_type=:Default)
 end
 
 
-function compute_α_from_h(h, N, μ, L)
-    α = OffsetArray(zeros(N, N), 1:N, 0:N-1)
-    for ℓ in 1:N
-        for i in 0:ℓ-1
-            if i == ℓ - 1
-                α[ℓ, i] = h[ℓ, ℓ-1]
-            elseif i <= ℓ - 2
-                α[ℓ, i] = α[ℓ-1, i] + h[ℓ, i] - (μ / L) * sum(h[ℓ, j] * α[j, i] for j in i+1:ℓ-1)
-            end
-        end
-    end
-    return α
-end
-
 function feasible_H_generator(N, L; step_size_type=:Default)
 
     # construct H
@@ -482,29 +468,6 @@ function solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;
 
         @objective(model_dual_PEP_with_known_stepsizes, Min, ν * R^2 + sum(λ[i_j_m_λ]*ε_set[i_j_m_λ.m]/2 for i_j_m_λ in idx_set_λ))
 
-    elseif objective_type == :find_sparse_sol #### WARNING, not of these take into account ε_set
-
-        @info "[🐮 ] Finding a sparse dual solution given the objective value upper bound"
-
-        @objective(model_dual_PEP_with_known_stepsizes, Min, sum(λ[i_j_m_λ] for i_j_m_λ in idx_set_λ))
-
-        @constraint(model_dual_PEP_with_known_stepsizes, ν * R^2 <= obj_val_upper_bound)
-
-    elseif objective_type == :find_M_λ
-
-        @info "[🐷 ] Finding upper bound on the entries of λ for BnB-PEP"
-
-        @objective(model_dual_PEP_with_known_stepsizes, Max, sum(λ[i_j_m_λ] for i_j_m_λ in idx_set_λ))
-
-        @constraint(model_dual_PEP_with_known_stepsizes, ν * R^2 <= obj_val_upper_bound)
-
-    elseif objective_type == :find_M_Z
-
-        @info "[🐯 ] Finding upper bound on the entries of Z for BnB-PEP"
-
-        @objective(model_dual_PEP_with_known_stepsizes, Max, tr(Z))
-
-        @constraint(model_dual_PEP_with_known_stepsizes, ν * R^2 <= obj_val_upper_bound)
 
     end
   
@@ -595,77 +558,6 @@ function solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;
 end
 
 
-# We also provide a function to check if in a particular feasible solution, these bounds are violated
-
-function bound_violation_checker_BnB_PEP(
-    # input point
-    # -----------
-    d_star_sol, λ_sol, ν_sol, Z_sol, L_cholesky_sol, h_sol,
-    # input bounds
-    # ------------
-    λ_lb, λ_ub, ν_lb, ν_ub, Z_lb, Z_ub, L_cholesky_lb, L_cholesky_ub, h_lb, h_ub;
-    # options
-    # -------
-    show_output=:on,
-    computing_global_lower_bound=:off
-)
-
-    if show_output == :on
-        @show [minimum(λ_sol) maximum(λ_sol) λ_ub]
-        @show [ν_lb ν_sol ν_ub]
-        @show [Z_lb minimum(Z_sol) maximum(Z_sol) Z_ub]
-        @show [L_cholesky_lb minimum(L_cholesky_sol) maximum(L_cholesky_sol) L_cholesky_ub]
-        @show [h_lb minimum(h_sol) maximum(h_sol) h_ub]
-    end
-
-    # bound satisfaction flag
-
-    bound_satisfaction_flag = 1
-
-    # verify bound for λ
-    if !(maximum(λ_sol) < λ_ub + 1e-8) # lower bound is already encoded in the problem constraint
-        @error "found λ is violating the input bound"
-        bound_satisfaction_flag = 0
-    end
-
-    # verify bound for ν: this is not necessary because this will be ensured due to our objective function being ν R^2
-    if !(maximum(ν_sol) <= ν_ub + 1e-8) # lower bound is already encoded in the problem constraint
-        @error "found ν is violating the input bound"
-        bound_satisfaction_flag = 0
-    end
-
-    # verify bound for Z
-    if !(Z_lb - 1e-8 < minimum(Z_sol) && maximum(Z_sol) < Z_ub + 1e-8)
-        @error "found Z is violating the input bound"
-        bound_satisfaction_flag = 0
-    end
-
-    if computing_global_lower_bound == :off
-        # verify bound for L_cholesky
-        if !(L_cholesky_lb - 1e-8 < minimum(L_cholesky_sol) && maximum(L_cholesky_sol) < L_cholesky_ub + 1e-8)
-            @error "found L_cholesky is violating the input bound"
-            bound_satisfaction_flag = 0
-        end
-    elseif computing_global_lower_bound == :on
-        @info "no need to check bound on L_cholesky"
-    end
-
-    # # verify bound for objective value
-    # if abs(obj_val_sol-BnB_PEP_cost_lb) <= ϵ_tol_sol
-    #     @error "found objective value is violating the input bound"
-    #     bound_satisfaction_flag = 0
-    # end
-
-    if bound_satisfaction_flag == 0
-        @error "[💀 ] some bound is violated, increase the bound intervals "
-    elseif bound_satisfaction_flag == 1
-        @info "[😅 ] all bounds are satisfied by the input point, rejoice"
-    end
-
-    return bound_satisfaction_flag
-
-end
-
 
 
 ##### Aaron's Code ######
@@ -725,25 +617,189 @@ function get_λ_matrices(λ_opt, N, M, TOL)
     return λ_matrices
 end
 
+function run_batch(prob::OptimizationProblem, args)
+    N, L, R, p, k = prob.N, prob.L, prob.R, prob.p, prob.k
+    
+    H = OffsetArray(zeros(N, N), 1:N, 0:N-1)
+    cnt = 0
+    for i in 1:N
+        for j in 0:i-1
 
-
-
-function get_λ_matrices(λ_opt, N, M, TOL)
-    λ_matrices = zeros(N + 2, N + 2, M)
-    for m = 1:M
-        for i in -1:N
-            for j in -1:N
-                if i == j
-                    continue
-                end
-                if λ_opt[i_j_m_idx(i,j,m)] > TOL
-                λ_matrices[i+2,j+2,m] = λ_opt[i_j_m_idx(i,j,m)]
-                end
-            end
+            H[i, j] = args[k+1+cnt]
+            cnt += 1
         end
     end
-    return λ_matrices
+    ε_set = args[1:k]
+    μ = 0
+    α = compute_α_from_h(prob, H, μ)
+    Y, _, _ = solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ; show_output=:off)
+    return Y
 end
 
 
+function optimize_ε_h(N, L, R, p, k, max_iter, max_time, lower, upper, initial_vals)
+
+    prob = OptimizationProblem(N, L, R, p, k)
+   
+    terminated_early = false
+
+    run_batch(prob, initial_vals)
+
+    iter_print_freq = 100
+
+    function my_callback(state)
+
+        if state.iteration % iter_print_freq == 0
+            println("Iter $(state.iteration): f = $(state.value)")
+        end
+        if state.value < 0
+            println("Terminating early: negative objective detected (f = $(state.value))")
+            terminated_early = true
+
+            return terminated_early
+        end
+        return false
+    end
+
+    options = Optim.Options(
+        iterations=max_iter,
+        f_tol= 1e-8,
+        x_tol= 1e-8,
+        time_limit=max_time,
+        show_trace=false,
+        callback=my_callback
+    )
+
+    result = Optim.optimize(args -> run_batch(prob, args), lower, upper, initial_vals, Fminbox(NelderMead()), options)
+    return result, terminated_early
+end
+
+
+
+function Optimize(N, L, R, p, M, initial_vals)
+    T = 0
+    max_iter = 1500
+    max_time = 30
+    H_size = div(N * (N + 1), 2)
+    lower = 0.00000001 * [ones(M); ones(H_size)]
+    upper = 2 * [ones(M); ones(H_size)]
+   # prob = OptimizationProblem(N, L, R, p, M)
+    result, terminated_early = optimize_ε_h(N, L, R, p, M, max_iter, max_time, lower, upper, initial_vals)
+    minimizer = Optim.minimizer(result)
+    H = get_H(N, M, minimizer)
+
+    ε_set = minimizer[1:M]
+    return ε_set, H, result, terminated_early
+
+end
+
+ 
+function run_batch_trials(N, L, R, p, M, trials)
+
+    min_F = Inf
+    min_H = nothing
+    min_ε = nothing
+    H_size = div(N * (N + 1), 2)
+    OGM = get_OGM_vector(N)
+    for i in 1:trials
+        initial_vals = [0.00002 * rand(M) .+ 0.0002; OGM ./ (1.5 .+ 0.1 * rand(H_size))]
+        ε_set, H, result, terminated_early = Optimize(N, L, R, p, M, initial_vals)
+        T = Optim.f_calls(result)
+        println("Trial $i done")
+        if !terminated_early
+            println(ε_set)
+            display(H)
+            if Optim.minimum(result) < min_F
+                min_F = Optim.minimum(result)
+                min_H = H
+                min_ε = ε_set
+            end
+        end
+    end
+
+    return min_F, min_H, min_ε
+end
+
+
+
+function compute_theta(N)  ## Ben's Code
+    θ = zeros(N + 1)
+    θ[1] = 1.0  # θ₀
+    for i in 2:N
+        θ[i] = (1 + sqrt(1 + 4 * θ[i-1]^2)) / 2
+    end
+    θ[N+1] = (1 + sqrt(1 + 8 * θ[N]^2)) / 2  # θ_N
+    return θ
+end
+function compute_H(N)
+    θ = compute_theta(N)
+    H = zeros(N, N)
+    for i in 1:N
+        for k in 1:i-1
+            sum_hjk = sum(H[j, k] for j in k:i)
+            H[i, k] = (1 / θ[i+1]) * (2 * θ[k] - sum_hjk)
+        end
+        H[i, i] = 1 + (2 * θ[i] - 1) / θ[i+1]
+    end
+    return H
+end
+
+
+
+function get_OGM_vector(N)
+    OGM = compute_H(N)
+    vec_lower = zeros(div(N * (N + 1), 2))
+    cnt = 0
+    for i in 1:N
+        for j in 1:i
+            cnt = cnt + 1
+            vec_lower[cnt] = OGM[i, j]
+        end
+    end
+    return vec_lower
+end
+
+
+function get_vector(N,H)
+    vec_lower = zeros(div(N * (N + 1), 2))
+    cnt = 0
+    for i in 1:N
+        for j in 1:i
+            cnt = cnt + 1
+            vec_lower[cnt] = H[i, j]
+        end
+    end
+    return vec_lower
+end
+
+
+function gen_data(L, R, trials, p_cnt, N_cnt, M_cnt)
+
+    results = Dict{Int, Dict{Int, Dict{String, Any}}}()
+
+    for N = 1:N_cnt
+        results[N] = Dict{Int, Dict{String, Any}}()
+
+        for M = 1:N+M_cnt  # change back to just 1:M_cnt
+            ε_p_data = Dict{Float64, Any}()
+            F_p_data = Dict{Float64, Any}()
+            H_p_data = Dict{Float64, Any}()
+
+            for p in LinRange(0.9, 1, p_cnt)
+                min_F, min_H, min_ε = run_batch_trials(N, L, R, p, M, trials)
+
+                ε_p_data[p] = min_ε
+                F_p_data[p] = min_F
+                H_p_data[p] = min_H
+            end
+
+            results[N][M] = Dict(
+                "F_values" => F_p_data,
+                "ε_sets" => ε_p_data,
+                "H_matrices" => H_p_data
+            )
+        end
+    end
+    return results
+end
 
