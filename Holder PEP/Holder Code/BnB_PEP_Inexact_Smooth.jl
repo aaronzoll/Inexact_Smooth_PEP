@@ -371,24 +371,57 @@ function solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ; sho
     )
     # data generator
     # --------------
-    for ε in ε_set
-        if p < 1
-            L_eps = ((1 - p) / (1 + p) * 1 / ε)^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
-        else
-            L_eps = L
-        end
+    sparsity_pattern = "none"
 
-        # interpolation constraint
-        # ------------------------
-        for i in I_N_star, j in I_N_star
-            if i != j
+    if sparsity_pattern == "none"
+        for ε in ε_set
+            if p < 1
+                L_eps = ((1 - p) / (1 + p) * 1 / ε)^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
+            else
+                L_eps = L
+            end
+
+            # interpolation constraint
+            # ------------------------
+            for i in I_N_star, j in I_N_star
+                if i != j
 
 
-                @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε / 2 <= 0)
+                    @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε / 2 <= 0)
+                end
             end
         end
-    end
 
+    elseif sparsity_pattern == "OGM" 
+        for m in 1:length(ε_set)
+            if p < 1
+                L_eps = ((1 - p) / (1 + p) * 1 / ε_set[m])^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
+            else
+                L_eps = L
+            end
+
+            # interpolation constraint
+            # ------------------------
+            for i in 0:N-1
+                
+                j = i+1 
+
+                @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[m] / 2 <= 0)
+                                
+
+            end
+
+            for j in 0:N
+
+                i = -1
+
+                @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[m] / 2 <= 0)
+
+            end
+        end
+
+
+    end
 
     # initial condition
     # -----------------
