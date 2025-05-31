@@ -4,10 +4,10 @@ include("BnB_PEP_Inexact_Smooth.jl")
 
 
 
-N, L, R, p, M, trials = 4, 1.0, 1.0, 0.92, 5, 3
+N, L, R, p, M, trials = 3, 1.0, 1.0, 0.92, 6, 3
  μ = 0 # strong convexity parameter?
-
- min_F, H, ε_set = run_batch_trials(N, L, R, p, M, trials)
+sparsity_pattern = "OGM"
+ min_F, H, ε_set = run_batch_trials(N, L, R, p, M, trials, sparsity_pattern)
 
  
 

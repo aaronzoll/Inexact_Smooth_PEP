@@ -335,7 +335,7 @@ end
 
 
 # Following function uses batch of ε to set inexact constraints for set
-function solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ; show_output=:off)
+function solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ, sparsity_pattern; show_output=:off)
     # number of points etc
     # --------------------
 
@@ -371,8 +371,8 @@ function solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ; sho
     )
     # data generator
     # --------------
-    sparsity_pattern = "none"
 
+    # TODO rename patterns later
     if sparsity_pattern == "none"
         for ε in ε_set
             if p < 1
@@ -392,7 +392,7 @@ function solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ; sho
             end
         end
 
-    elseif sparsity_pattern == "OGM" 
+    elseif sparsity_pattern == "OGM" # here there are M(2N+1) constraints, for each m, we have i,i+1 and ⋆,i 
         for m in 1:length(ε_set)
             if p < 1
                 L_eps = ((1 - p) / (1 + p) * 1 / ε_set[m])^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
@@ -420,7 +420,36 @@ function solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ; sho
             end
         end
 
+    elseif sparsity_pattern == "single step" # here we have a single epsilon handle 0,1 and ⋆,1 another handles 1,2 and ⋆,2 etc. 
+        # requires at least M = N+1
+        M = length(ε_set)
+        for m in 1:M-1
+            if p < 1
+                L_eps = ((1 - p) / (1 + p) * 1 / ε_set[m])^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
+            else
+                L_eps = L
+            end
 
+            # interpolation constraint
+            # ------------------------
+            i = m-1
+            j = m
+            @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[m] / 2 <= 0)
+                                
+
+    
+            i = -1
+            j = m-1
+            @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[m] / 2 <= 0)
+
+        end
+
+
+        L_eps = ((1 - p) / (1 + p) * 1 / ε_set[M])^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
+            i = -1
+            j = M-1
+            @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[M] / 2 <= 0)
+ 
     end
 
     # initial condition
@@ -650,7 +679,7 @@ function get_λ_matrices(λ_opt, N, M, TOL)
     return λ_matrices
 end
 
-function run_batch(prob::OptimizationProblem, args)
+function run_batch(prob::OptimizationProblem, args, sparsity_pattern)
     N, L, R, p, k = prob.N, prob.L, prob.R, prob.p, prob.k
     
     H = OffsetArray(zeros(N, N), 1:N, 0:N-1)
@@ -665,18 +694,18 @@ function run_batch(prob::OptimizationProblem, args)
     ε_set = args[1:k]
     μ = 0
     α = compute_α_from_h(prob, H, μ)
-    Y, _, _ = solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ; show_output=:off)
+    Y, _, _ = solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ, sparsity_pattern; show_output=:off)
     return Y
 end
 
 
-function optimize_ε_h(N, L, R, p, k, max_iter, max_time, lower, upper, initial_vals)
+function optimize_ε_h(N, L, R, p, k, max_iter, max_time, lower, upper, initial_vals, sparsity_pattern)
 
     prob = OptimizationProblem(N, L, R, p, k)
    
     terminated_early = false
 
-    run_batch(prob, initial_vals)
+    run_batch(prob, initial_vals, sparsity_pattern)
 
     iter_print_freq = 100
 
@@ -703,13 +732,13 @@ function optimize_ε_h(N, L, R, p, k, max_iter, max_time, lower, upper, initial_
         callback=my_callback
     )
 
-    result = Optim.optimize(args -> run_batch(prob, args), lower, upper, initial_vals, Fminbox(NelderMead()), options)
+    result = Optim.optimize(args -> run_batch(prob, args, sparsity_pattern), lower, upper, initial_vals, Fminbox(NelderMead()), options)
     return result, terminated_early
 end
 
 
 
-function Optimize(N, L, R, p, M, initial_vals)
+function Optimize(N, L, R, p, M, initial_vals, sparsity_pattern)
     T = 0
     max_iter = 1500
     max_time = 30
@@ -717,7 +746,7 @@ function Optimize(N, L, R, p, M, initial_vals)
     lower = 0.00000001 * [ones(M); ones(H_size)]
     upper = 2 * [ones(M); ones(H_size)]
    # prob = OptimizationProblem(N, L, R, p, M)
-    result, terminated_early = optimize_ε_h(N, L, R, p, M, max_iter, max_time, lower, upper, initial_vals)
+    result, terminated_early = optimize_ε_h(N, L, R, p, M, max_iter, max_time, lower, upper, initial_vals, sparsity_pattern)
     minimizer = Optim.minimizer(result)
     H = get_H(N, M, minimizer)
 
@@ -727,7 +756,7 @@ function Optimize(N, L, R, p, M, initial_vals)
 end
 
  
-function run_batch_trials(N, L, R, p, M, trials)
+function run_batch_trials(N, L, R, p, M, trials, sparsity_pattern)
 
     min_F = Inf
     min_H = nothing
@@ -736,7 +765,7 @@ function run_batch_trials(N, L, R, p, M, trials)
     OGM = get_OGM_vector(N)
     for i in 1:trials
         initial_vals = [0.00002 * rand(M) .+ 0.0002; OGM ./ (1.5 .+ 0.1 * rand(H_size))]
-        ε_set, H, result, terminated_early = Optimize(N, L, R, p, M, initial_vals)
+        ε_set, H, result, terminated_early = Optimize(N, L, R, p, M, initial_vals, sparsity_pattern)
         T = Optim.f_calls(result)
         println("Trial $i done")
         if !terminated_early
