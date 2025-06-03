@@ -19,7 +19,7 @@ args = [0.00165039, 0.0033389, 0.00688822, 1.46046, 0.122474, 1.56142]
 default_obj_val_upper_bound = 1e6
 zero_idx = [] # in the form (i_idx, j_idx,m) where -1 -> ⋆
 
-F_opt, λ_opt = solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;show_output = :off,
+F_opt, λ_opt, Z_opt = solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;show_output = :off,
     obj_val_upper_bound=default_obj_val_upper_bound)
 
 λ_matrices = get_λ_matrices(λ_opt, N, M, 1e-4)  # sets values below TOL to zero

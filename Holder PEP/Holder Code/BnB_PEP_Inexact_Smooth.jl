@@ -145,7 +145,8 @@ function data_generator_function(N, L, α; input_type=:stepsize_constant)
         𝐱[:, 0] = 𝐱_0
 
         for i in 1:N
-            𝐱[:, i] = 𝐱[:, 0] - (1 / L) .* (sum(α[i, j] * 𝐠[:, j] for j in 0:i-1))
+             𝐱[:, i] = 𝐱[:, 0] - (1 / L) .* (sum(α[i, j] * 𝐠[:, j] for j in 0:i-1))
+          #  𝐱[:, i] = 𝐱[:, 0] - (1) .* (sum(α[i, j] * 𝐠[:, j] for j in 0:i-1)) # no longer divide by L in construction
         end
 
     elseif input_type == :stepsize_variable
@@ -592,7 +593,7 @@ function solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;
 
     # store Z_opt
 
-    #  Z_opt1 = value.(Z_1)
+    Z_opt = value.(Z)
     #  Z_opt2 = value.(Z_2)
 
     # compute cholesky
@@ -611,11 +612,11 @@ function solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;
     # store objective
 
     #  ℓ_1_norm_λ = sum(λ_opt)
-    #   tr_Z = tr(Z_opt1)
+    #   tr_Z = tr(Z_opt)
     original_performance_measure = ν_opt * R^2 + sum(λ_opt[i_j_m_λ]*ε_set[i_j_m_λ.m]/2 for i_j_m_λ in idx_set_λ)
     # return all the stored values
 
-    return original_performance_measure, λ_opt
+    return original_performance_measure, λ_opt, Z_opt
 
 end
 
@@ -647,6 +648,8 @@ end
 
 
 function compute_α_from_h(prob::OptimizationProblem, h, μ)
+    #### issues may arise if μ ≠ 0, since we took away scaling by L
+
     N, L = prob.N, prob.L
     α = OffsetArray(zeros(N, N), 1:N, 0:N-1)
     for ℓ in 1:N
@@ -725,8 +728,8 @@ function optimize_ε_h(N, L, R, p, k, max_iter, max_time, lower, upper, initial_
 
     options = Optim.Options(
         iterations=max_iter,
-        f_tol= 1e-8,
-        x_tol= 1e-8,
+        f_tol= 1e-12,
+        x_tol= 1e-12,
         time_limit=max_time,
         show_trace=false,
         callback=my_callback
@@ -740,8 +743,8 @@ end
 
 function Optimize(N, L, R, p, M, initial_vals, sparsity_pattern)
     T = 0
-    max_iter = 1500
-    max_time = 30
+    max_iter = 2000
+    max_time = 60
     H_size = div(N * (N + 1), 2)
     lower = 0.00000001 * [ones(M); ones(H_size)]
     upper = 2 * [ones(M); ones(H_size)]
@@ -764,7 +767,7 @@ function run_batch_trials(N, L, R, p, M, trials, sparsity_pattern)
     H_size = div(N * (N + 1), 2)
     OGM = get_OGM_vector(N)
     for i in 1:trials
-        initial_vals = [0.00002 * rand(M) .+ 0.0002; OGM ./ (1.5 .+ 0.1 * rand(H_size))]
+        initial_vals = [0.03 * rand(M) .+ 0.002; OGM ./ (1.5 .+ 0.1 * rand(H_size))]
         ε_set, H, result, terminated_early = Optimize(N, L, R, p, M, initial_vals, sparsity_pattern)
         T = Optim.f_calls(result)
         println("Trial $i done")
