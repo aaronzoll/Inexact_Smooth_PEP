@@ -868,3 +868,8 @@ function gen_data(L, R, trials, p_cnt, N_cnt, M_cnt)
     return results
 end
 
+function L_eps_p(ε,p)
+
+    return ((1 - p) / (1 + p) * 1 / ε)^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
+
+end
