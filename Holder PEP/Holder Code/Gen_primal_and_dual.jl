@@ -2,10 +2,10 @@ using Revise, Optim, JLD2
 include("BnB_PEP_Inexact_Smooth.jl")
 
 # set parameters, breaking for large L, R and small p
-L, R, p = 1.9, 1.3, 0.72
+L, R, p = 0.7, 0.4, 0.92
 
-N = 1
-M = 3 # 2N+1?
+N = 3
+M = 7 # 2N+1?
 trials = 5 # number of outer optimizations to run
 
 default_obj_val_upper_bound = 1e6
@@ -15,7 +15,7 @@ default_obj_val_upper_bound = 1e6
 ##### Batch Run Primal ##### 
 # nonconvex heuristic to get optimal H, ε_set for given N, L, R, p, M 
 
-sparsity_pattern = "OGM"
+sparsity_pattern = "single step"
 min_F, H, ε_set = run_batch_trials(N, L, R, p, M, trials, sparsity_pattern)
  
 
@@ -25,7 +25,7 @@ min_F, H, ε_set = run_batch_trials(N, L, R, p, M, trials, sparsity_pattern)
 # Build α matrix from optimal H 
 α = compute_α_from_h(OptimizationProblem(N, L, R, p, M), H, μ)
 
-zero_idx = [] # in the form (i_idx, j_idx,m) where -1 -> ⋆, forces λ_{i,j,m} = 0
+zero_idx = [(-1,0,1),(-1,2,3)] # in the form (i_idx, j_idx,m) where -1 -> ⋆, forces λ_{i,j,m} = 0
 
 F_opt, λ_opt, Z_opt = solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx; show_output = :off,
     obj_val_upper_bound=default_obj_val_upper_bound)
@@ -99,4 +99,4 @@ function get_scalars_N_1(scalar_type)
 end
 
 
-ε_certificate, λ_certificate, z_vec, H_certificate, σ, τ, rate =  get_scalars_N_1("scaled")
+# ε_certificate, λ_certificate, z_vec, H_certificate, σ, τ, rate =  get_scalars_N_1("scaled")

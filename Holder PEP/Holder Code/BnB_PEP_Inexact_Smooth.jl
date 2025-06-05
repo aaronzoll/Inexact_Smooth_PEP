@@ -421,36 +421,33 @@ function solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ, spa
             end
         end
 
-    elseif sparsity_pattern == "single step" # here we have a single epsilon handle 0,1 and ⋆,1 another handles 1,2 and ⋆,2 etc. 
-        # requires at least M = N+1
-        M = length(ε_set)
-        for m in 1:M-1
-            if p < 1
-                L_eps = ((1 - p) / (1 + p) * 1 / ε_set[m])^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
-            else
-                L_eps = L
-            end
+    elseif sparsity_pattern == "single step" # here each ε handles a different constraint
+        m = 1
 
-            # interpolation constraint
-            # ------------------------
-            i = m-1
-            j = m
-            @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[m] / 2 <= 0)
-                                
+        # interpolation constraint
+        # ------------------------
 
-    
-            i = -1
-            j = m-1
+
+        for i in 0:N-1
+            L_eps = ((1 - p) / (1 + p) * 1 / ε_set[m])^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
+
+            j = i+1 
+
             @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[m] / 2 <= 0)
+            
+            m = m+1
 
         end
 
+        for j in 0:N
+            L_eps = ((1 - p) / (1 + p) * 1 / ε_set[m])^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
 
-        L_eps = ((1 - p) / (1 + p) * 1 / ε_set[M])^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
             i = -1
-            j = M-1
-            @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[M] / 2 <= 0)
- 
+
+            @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, α, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε_set[m] / 2 <= 0)
+
+            m = m+1
+        end
     end
 
     # initial condition
