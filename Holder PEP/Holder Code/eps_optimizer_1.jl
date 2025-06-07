@@ -99,7 +99,7 @@ function plot_p_rates(R, β, k, plotting_type)
     elseif plotting_type == "Rates"
         plot!(X,Y1,labels = "same ε")
         plot!(X,Y2, labels = "different ε")
-        scatter!([0], [β*R/2], labels = "1/2*βR")
+        scatter!([0], [β*R/(sqrt(1)+1)], labels = "1/2*βR")
         scatter!([0], [sqrt(6)*β * R/4], labels = "sqrt(6)/4*βR")
 
     end
