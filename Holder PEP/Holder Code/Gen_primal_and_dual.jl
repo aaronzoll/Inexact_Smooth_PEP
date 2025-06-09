@@ -1,12 +1,12 @@
 using Revise, Optim, JLD2
 include("BnB_PEP_Inexact_Smooth.jl")
 
-# set parameters, breaking for large L, R and small p
-L, R, p = 1.7, 0.8, 0.87
+# set parameters. Poor convergence for large L, R and small p
+L, R, p = 1.9, 0.4, 0.94
 
 N = 2
 M = 2*N+1 # 2N+1?
-trials = 3 # number of outer optimizations to run
+trials = 1 # number of outer optimizations to run
 
 default_obj_val_upper_bound = 1e6
 μ = 0 # strong convexity parameter?
@@ -14,9 +14,9 @@ default_obj_val_upper_bound = 1e6
 
 ##### Batch Run Primal ##### 
 # nonconvex heuristic to get optimal H, ε_set for given N, L, R, p, M 
-
+max_iter, max_time = 10000, 30
 sparsity_pattern = "single step"
-min_F, H, ε_set = run_batch_trials(N, L, R, p, M, trials, sparsity_pattern)
+min_F, H, ε_set = run_batch_trials(N, L, R, p, M, trials, sparsity_pattern, max_iter, max_time)
  
 
 
@@ -44,115 +44,86 @@ v_scaled = Z_chol_scaled[:,1]
 ##### Verify Scalar Values #####
 
 # sets appropriate values of ε from optimal set, used in next calculations
-function find_eps_idx(TOL)
-    ε_0_1, ε_1_2, ε_star_0, ε_star_1, ε_star_2 = 0, 0, 0, 0, 0
+function find_eps_idx(N, TOL)
+    ε_i_j = zeros(N)
+    ε_star_i = zeros(N+1)
     for m = 1:M
-        if λ_opt[i_j_m_idx(0,1,m)] > TOL
-            ε_0_1 = ε_set[m]
+        for n = 1:N
+            if λ_opt[i_j_m_idx(n-1,n,m)] > TOL
+                ε_i_j[n] = ε_set[m]
+            end
+
+            if λ_opt[i_j_m_idx(-1,n-1,m)] > TOL
+                ε_star_i[n] = ε_set[m]
+            end        
         end
-        if λ_opt[i_j_m_idx(-1,0,m)] > TOL
-            ε_star_0 = ε_set[m]
-        end
-        if λ_opt[i_j_m_idx(-1,1,m)] > TOL
-            ε_star_1 = ε_set[m]
-        end
-        if λ_opt[i_j_m_idx(1,2,m)] > TOL
-            ε_1_2 = ε_set[m]
-        end
-        if λ_opt[i_j_m_idx(-1,2,m)] > TOL
-            ε_star_2 = ε_set[m]        
-        end
+
+        if λ_opt[i_j_m_idx(-1,N,m)] > TOL
+            ε_star_i[N+1] = ε_set[m]
+        end     
     end
 
-    return   ε_0_1, ε_1_2, ε_star_0, ε_star_1, ε_star_2
+    return  ε_i_j, ε_star_i
 end
 
 # set scalar_type = "scaled" to compare to SDP results like Z, λ_opt, etc, 
 # regardless we should expect rate = min_F = F_opt
-function get_scalars_N_1(scalar_type)
-    ε_0_1, ε_star_0, ε_star_1 = find_eps_idx(1e-5)
 
-    α_0 = 1/L_eps_p(ε_0_1,p)+ 1/L_eps_p(ε_star_0,p)
-    λ_star_0 = α_0
-    λ_0_1 = α_0
+function get_scalars(N, scalar_type)
+    ε_i_j = zeros(N) # [ε_0_1, ε_1_2, ..., ε_{N-1}_N]
+    λ_i_j = zeros(N)
+    λ_star_i = zeros(N+1)  # [ε_star_0, ε_star_1, ..., ε_star_N]
+    ε_star_i = zeros(N+1)
+    ε_i_j, ε_star_i = find_eps_idx(N, 1e-4)
 
-    λ_star_1 = 1/2*(1/(L_eps_p(ε_star_1,p)) + sqrt( (1/(L_eps_p(ε_star_1,p))^2 + 4*λ_0_1/L_eps_p(ε_0_1,p)))) 
-    α_1 = λ_star_1
+    α_set = zeros(N+1)
+    α_set[1] = 1/L_eps_p(ε_i_j[1],p)+ 1/L_eps_p(ε_star_i[1],p)
+    λ_i_j[1] = α_set[1]
+    λ_star_i[1] = α_set[1]
 
-    τ = λ_star_1 + λ_0_1 
 
-    H_certificate = (λ_0_1 + L_eps_p(ε_0_1,p)*α_0*α_1)/(L_eps_p(ε_0_1,p) * (λ_0_1 + λ_star_1)) * L
-    σ = (ε_0_1*λ_0_1 + ε_star_0*λ_star_0 + ε_star_1*λ_star_1)/2
-    ### test values ###
+    for k = 2:N
+    B = -(1/L_eps_p(ε_star_i[k],p)+ 1/L_eps_p(ε_i_j[k],p))
+    C = -λ_i_j[k-1] * (1/L_eps_p(ε_i_j[k-1],p)+ 1/L_eps_p(ε_i_j[k],p))
+    λ_star_i[k] = 1/2 * (-B + sqrt(B^2-4*C))
 
-    
-
-    ε_certificate = [ε_0_1, ε_star_0, ε_star_1]
-    λ_certificate = [λ_star_0, λ_star_1, λ_0_1]   
-    z_vec = [1, -α_0, -α_1]
-    rate = (1/2*R^2 + σ)/τ
-
-    if scalar_type == "scaled" 
-        Scaled_λ = 2 * v[1]^2 * [λ_star_0, λ_star_1, λ_0_1] # should look like values in support of λ_opt
-        Scaled_τ = 2 * v[1]^2 * τ
-        Scaled_z = v[1] * [1, -α_0, -α_1] # should look like v, with v*v' = Z
-        Scaled_σ = σ * 2 * v[1]^2
-        return ε_certificate, Scaled_λ, Scaled_z, H_certificate, Scaled_σ, Scaled_τ, rate
+    λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
+    α_set[k] = λ_star_i[k]
     end
 
 
-    return ε_certificate, λ_certificate, z_vec, H_certificate, σ, τ, rate 
-end
+
+    B = -1/L_eps_p(ε_star_i[N+1],p)
+    C = -λ_i_j[N]*1/L_eps_p(ε_i_j[N],p)
+    λ_star_i[N+1] = 1/2 * (-B + sqrt(B^2-4*C))
+
+    α_set[N+1] = λ_star_i[N+1]
 
 
-# ε_certificate, λ_certificate, z_vec, H_certificate, σ, τ, rate =  get_scalars_N_1("scaled")
+    H_certificate = zeros(N,N)
 
-
-function get_scalars_N_2(scalar_type)
-    ε_0_1, ε_1_2, ε_star_0, ε_star_1, ε_star_2 = find_eps_idx(1e-4)
-    α_0 = 1/L_eps_p(ε_0_1,p)+ 1/L_eps_p(ε_star_0,p)
-    λ_0_1 = α_0
-    λ_star_0 = α_0
-
-    B1 = -(1/L_eps_p(ε_star_1,p)+ 1/L_eps_p(ε_1_2,p))
-    C1 = -λ_0_1 * (1/L_eps_p(ε_0_1,p)+ 1/L_eps_p(ε_1_2,p))
-    λ_star_1 = 1/2 * (-B1 + sqrt(B1^2-4*C1))
-
-    λ_1_2 = λ_0_1 + λ_star_1
-
-    α_1 = λ_star_1
-
-    B2 = -1/L_eps_p(ε_star_2,p)
-    C2 = -λ_1_2*1/L_eps_p(ε_1_2,p)
-    λ_star_2 = 1/2 * (-B2 + sqrt(B2^2-4*C2))
-
-    α_2 = λ_star_2
-
-
-
-    # NOTE: In H_2_1 calc there is an extra 1/L because algo built that in x_k updates
-    # This makes sense, but make sure to implement in future recurrsion where applicable
-    H_1_1 = (λ_0_1 + L_eps_p(ε_0_1,p)*α_0*α_1)/(L_eps_p(ε_0_1,p) * (λ_0_1 + λ_star_1)) * L
-    H_2_1 = (α_0*α_2-1/L*λ_star_2*H_1_1)/(λ_1_2 + λ_star_2) * L  
-    H_2_2 = (λ_1_2 + L_eps_p(ε_1_2,p)*α_1*α_2)/(L_eps_p(ε_1_2,p) * (λ_1_2 + λ_star_2)) * L
-
-
-    τ = λ_star_2 + λ_1_2 
-    σ = (ε_0_1*λ_0_1 + ε_1_2*λ_1_2 + ε_star_0*λ_star_0 + ε_star_1*λ_star_1 + ε_star_2*λ_star_2)/2
-    ε_certificate = [ε_0_1, ε_1_2, ε_star_0, ε_star_1, ε_star_2]
-    λ_certificate = [λ_star_0, λ_1_2, λ_star_0, λ_star_1, λ_star_2]   
-    z_vec = [1, -α_0, -α_1, -α_2]
-    H_certificate = zeros(2,2)
-    H_certificate[1,1] = H_1_1
-    H_certificate[2,1] = H_2_1
-    H_certificate[2,2] = H_2_2
-
+    for i in 1:N
+        for j in 1:i
+            if i == j
+                H_certificate[i,j] = (λ_i_j[i] + L_eps_p(ε_i_j[i],p)*α_set[i]*α_set[i+1])/(L_eps_p(ε_i_j[i],p) * (λ_i_j[i] + λ_star_i[i+1])) * L
+            else
+                H_certificate[i,j] = (α_set[i+1]*α_set[j] - 1/L*λ_star_i[i+1]*sum([H_certificate[k,j] for k in j:i-1]))/(λ_i_j[i]+λ_star_i[i+1]) * L
+            end
+        end
+    end
+   
+    τ = λ_star_i[N+1] + λ_i_j[N] 
+    ε_certificate = [ε_i_j; ε_star_i]
+    λ_certificate = [λ_i_j; λ_star_i]
+    σ = 1/2 * ε_certificate' * λ_certificate
+    z_vec = [1; -α_set]
+  
     rate = (1/2*R^2 + σ)/τ
 
     if scalar_type == "scaled" 
         Scaled_λ = 2 * v[1]^2 * λ_certificate # should look like values in support of λ_opt
         Scaled_τ = 2 * v[1]^2 * τ
-        Scaled_z = v[1] * [1, -α_0, -α_1, -α_2] # should look like v, with v*v' = Z
+        Scaled_z = v[1] * z_vec # should look like v, with v*v' = Z
         Scaled_σ = σ * 2 * v[1]^2
         return ε_certificate, Scaled_λ, Scaled_z, H_certificate, Scaled_σ, Scaled_τ, rate
     end
@@ -161,4 +132,4 @@ function get_scalars_N_2(scalar_type)
 
 end
 
-ε_certificate, λ_certificate, z_vec, H_certificate, σ, τ, rate =  get_scalars_N_2("scaled")
+ε_certificate, λ_certificate, z_vec, H_certificate, σ, τ, rate =  get_scalars(N, "scaled")

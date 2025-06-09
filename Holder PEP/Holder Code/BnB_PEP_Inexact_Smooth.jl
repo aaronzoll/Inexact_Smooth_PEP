@@ -738,10 +738,8 @@ end
 
 
 
-function Optimize(N, L, R, p, M, initial_vals, sparsity_pattern)
+function Optimize(N, L, R, p, M, initial_vals, sparsity_pattern, max_iter, max_time)
     T = 0
-    max_iter = 2000
-    max_time = 60
     H_size = div(N * (N + 1), 2)
     lower = 0.00000001 * [ones(M); ones(H_size)]
     upper = 2 * [ones(M); ones(H_size)]
@@ -756,7 +754,7 @@ function Optimize(N, L, R, p, M, initial_vals, sparsity_pattern)
 end
 
  
-function run_batch_trials(N, L, R, p, M, trials, sparsity_pattern)
+function run_batch_trials(N, L, R, p, M, trials, sparsity_pattern, max_iter, max_time)
 
     min_F = Inf
     min_H = nothing
@@ -765,7 +763,7 @@ function run_batch_trials(N, L, R, p, M, trials, sparsity_pattern)
     OGM = get_OGM_vector(N)
     for i in 1:trials
         initial_vals = [0.03 * rand(M) .+ 0.002; OGM ./ (1.5 .+ 0.1 * rand(H_size))]
-        ε_set, H, result, terminated_early = Optimize(N, L, R, p, M, initial_vals, sparsity_pattern)
+        ε_set, H, result, terminated_early = Optimize(N, L, R, p, M, initial_vals, sparsity_pattern, max_iter, max_time)
         T = Optim.f_calls(result)
         println("Trial $i done")
         if !terminated_early
