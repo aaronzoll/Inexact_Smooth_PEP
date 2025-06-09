@@ -4,7 +4,7 @@ include("BnB_PEP_Inexact_Smooth.jl")
 # set parameters. Poor convergence for large L, R and small p
 L, R, p = 1.9, 0.4, 0.94
 
-N = 2
+N = 1
 M = 2*N+1 # 2N+1?
 trials = 1 # number of outer optimizations to run
 

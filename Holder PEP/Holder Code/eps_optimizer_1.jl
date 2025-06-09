@@ -108,8 +108,8 @@ function plot_p_rates(R, β, k, plotting_type)
 
 end
 
-R = 5
-β = 1.47
+R = 1
+β = 1
 k = 100 # number of points to test
 plotting_type = "Rates" # choose "epsilons" or "Rates"
 plot_p_rates(R, β, k, plotting_type)
