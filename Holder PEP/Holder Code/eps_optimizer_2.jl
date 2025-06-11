@@ -149,6 +149,6 @@ end
 R = 1
 β = 1
 k = 10 # number of points to test
-plotting_type = "Rates" # choose "epsilons" or "Rates"
+plotting_type = "epsilons" # choose "epsilons" or "Rates"
 plot_p_rates(R, β, k, plotting_type)
 

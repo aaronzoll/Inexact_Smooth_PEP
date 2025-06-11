@@ -2,9 +2,9 @@ using Revise, Optim, JLD2
 include("BnB_PEP_Inexact_Smooth.jl")
 
 # set parameters. Poor convergence for large L, R and small p
-L, R, p = 1.9, 0.4, 0.94
+L, R, p = 1, 1, 1
 
-N = 1
+N = 4
 M = 2*N+1 # 2N+1?
 trials = 1 # number of outer optimizations to run
 
