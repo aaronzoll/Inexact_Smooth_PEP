@@ -113,7 +113,7 @@ end
 
 function run_N_opti(N, R, β, p, printing, type)
     M = 2 * N + 1
-    lower = 0.000001 * ones(M)
+    lower = 0.00000000001 * ones(M)
     upper = 3 * ones(M)
     initial_vals = 0.3 * ones(M)
 
@@ -126,7 +126,7 @@ function run_N_opti(N, R, β, p, printing, type)
     )
     f = ε_set -> get_rate(N, M, L_eps, p, ε_set, type)
     g! = (G, x) -> (G[:] = ForwardDiff.gradient(f, x))
-    result = Optim.optimize(f, g!, lower, upper, initial_vals, Fminbox(BFGS()), options)
+    result = Optim.optimize(f, lower, upper, initial_vals, Fminbox(NelderMead()), options)
     if type == "same"
         min_ε = Optim.minimizer(result)[1] .* (ones(M))
     elseif type == "diff"
@@ -183,7 +183,7 @@ function plot_p_rates(R, β, k, plotting_type)
 
     end
 
-
+    return ε_sets2
 
 end
 
@@ -198,7 +198,7 @@ function plot_N_rates(R, β, p, k, plotting_type)
     for (cnt, N) in enumerate(X)
 
         min_ε1, Y1[cnt], H_val = run_N_opti(N, R, β, p, 0, "same") # PRINTING OFF
-        # min_ε2, Y2[cnt], H_val = run_N_opti(N, R, β, p, 0, "diff") # PRINTING OFF
+         min_ε2, Y2[cnt], H_val = run_N_opti(N, R, β, p, 0, "diff") # PRINTING OFF
 
         if mod(N,10) == 0
         println("trial: $N")
@@ -214,7 +214,7 @@ function plot_N_rates(R, β, p, k, plotting_type)
 
     elseif plotting_type == "Rates"
         plot!(X, Y1, labels="same ε", xaxis=:log, yaxis=:log)
-     #    plot!(X, Y2, labels="different ε",  xaxis=:log, yaxis=:log)
+         plot!(X, Y2, labels="different ε",  xaxis=:log, yaxis=:log)
 
     end
 
@@ -241,28 +241,52 @@ function OGM_rates(β, R, N)
 end
 
 
+function get_diff_opt(β, R, k, N)
+    plot(title="β = $β, R = $R")
+    p_range = LinRange(1e-6,1-1e-6,k)
+    coeffs = zeros(k)
+
+
+    for (cnt, p) in enumerate(p_range)
+
+        _, rate, _ = run_N_opti(N, R, β, p, 0, "diff") # PRINTING OFF
+
+
+        println("Computing coeff for p = $p")
+
+
+        coeffs[cnt] = rate/(β*R^(p+1))*N^((3*p+1)/2)
+
+    end
+
+    plot!(p_range, coeffs)
+    return p_range, coeffs
+end
 
 R = 1
 β = 1
 k = 50 # number of points to test
-N = 3
-M = 2 * N + 1
-plotting_type = "Rates" # choose "epsilons" or "Rates"
-# plot_p_rates(R, β, k, plotting_type)
+N  = 3
+M = 2*N+1
 
-p = 0.6
-if p == 1
-    X_range = 1:k
+plotting_type = "epsilons" # choose "epsilons" or "Rates"
+ε_sets2 = plot_p_rates(R, β, k, plotting_type)
 
-    Y_range = []
-    for i = 1:k
-        push!(Y_range, OGM_rates(β, R, i)[i]) # last iterate different for OGM
-    end
-else
-    X_range = LinRange(1, k, 20)
+# p_range, coeffs = get_diff_opt(β, R, k, N)
 
-    Y_range = β * R^(1 + p) ./ ((X_range .+ 1) .^ ((1 + 3 * p) / 2)) # add +1 to match subgrad method
-    # is the rate of βR/sqrt(T+1) not optimal up to coeffs?
-end
-plot_N_rates(R, β, p, k, plotting_type)
-plot!(X_range, Y_range, xaxis=:log, yaxis=:log)
+# p = 1
+# if p == 1
+#     X_range = 1:k
+
+#     Y_range = []
+#     for i = 1:k
+#         push!(Y_range, OGM_rates(β, R, i)[i]) # last iterate different for OGM
+#     end
+# else
+#     X_range = LinRange(1, k, 20)
+
+#     Y_range = β * R^(1 + p) ./ ((X_range .+ 1) .^ ((1 + 3 * p) / 2)) # add +1 to match subgrad method
+#     # is the rate of βR/sqrt(T+1) not optimal up to coeffs?
+# end
+# plot_N_rates(R, β, p, k, plotting_type)
+# plot!(X_range, Y_range, xaxis=:log, yaxis=:log)
