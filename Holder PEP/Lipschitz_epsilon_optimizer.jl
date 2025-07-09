@@ -1,0 +1,115 @@
+using JuMP, MosekTools, Mosek, Plots, Random, Revise, Ipopt, Optim, CurveFit
+
+
+function get_rate_Lip(N, β, ε_set)
+    T = eltype(ε_set)  # determines if Float64 or Dual
+    ε_i_j = ε_set[1:N]
+
+    λ_i_j = zeros(T, N)
+    λ_star_i = zeros(T, N + 1)
+    α_set = zeros(T, N + 1)
+
+    α_set[1] = ε_i_j[1] / β^2
+    λ_i_j[1] = α_set[1]
+    λ_star_i[1] = α_set[1]
+
+    for k = 2:N
+        B = -ε_i_j[k]
+        C = -λ_i_j[k-1] * (ε_i_j[k-1] + ε_i_j[k])
+        λ_star_i[k] = (-B + sqrt(B^2 - 4 * C)) / (2 * β^2)
+
+        λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
+        α_set[k] = λ_star_i[k]
+    end
+
+    λ_star_i[N+1] = sqrt(λ_i_j[N] * ε_i_j[N]) / β^2
+    α_set[N+1] = λ_star_i[N+1]
+
+
+    τ = λ_star_i[N+1] + λ_i_j[N]
+    ε_certificate = [ε_i_j; zeros(N + 1)]
+    λ_certificate = [λ_i_j; λ_star_i]
+    σ = 1 / 2 * ε_certificate' * λ_certificate
+
+    rate = (1 / 2 * R^2 + σ) / τ
+    return rate
+end
+
+function run_N_opti(N, β)
+    lower = 0.00000000001 * ones(N)
+    upper = 3 * ones(N)
+    initial_vals = 0.3 * ones(N)
+    iter_print_freq = 100
+
+    function my_callback(state)
+
+        if state.iteration % iter_print_freq == 0 && state.iteration > 1
+            println("Iter $(state.iteration): f = $(state.value)")
+        end
+        if state.value < 0
+            println("Terminating early: negative objective detected (f = $(state.value))")
+            terminated_early = true
+
+            return terminated_early
+        end
+        return false
+    end
+
+    options = Optim.Options(
+        iterations=2500,
+        f_tol=1e-8,
+        x_tol=1e-8,
+        time_limit=60,
+        show_trace=false,
+        callback=my_callback
+    )
+
+    f = ε_set -> get_rate_Lip(N, β, ε_set)
+    result = Optim.optimize(f, lower, upper, initial_vals, Fminbox(NelderMead()), options)
+
+    min_ε = Optim.minimizer(result)
+
+
+    rate = Optim.minimum(result)
+
+
+    return min_ε, rate
+end
+
+
+
+
+function make_L_eps(β)
+    return ε -> (β^2 / ε)
+end
+
+
+
+# === Run Example ===
+N = 51
+
+
+β = 1
+L_eps = make_L_eps(β)
+R = 1
+
+# compute OGM sparsity optimal epsilons
+min_ε_sparse, rate_sparse = run_N_opti(N, β)
+display(min_ε_sparse)
+display(rate_sparse)
+
+odds = min_ε_sparse[1:2:N]
+evens = min_ε_sparse[2:2:N]
+
+odds_x = 1:2:N
+evens_x = 2:2:N
+scatter(odds_x, odds)
+scatter!(evens_x, evens)
+
+a_odd, b_odd = power_fit(odds_x, odds)
+a_even, b_even = linear_fit(evens_x, evens)
+
+x_range = LinRange(1, N, 1000)
+plot!(x_range, @. a_odd * x_range^b_odd)
+plot!(x_range, @. a_even + b_even * x_range)
+

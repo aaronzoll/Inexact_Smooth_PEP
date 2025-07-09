@@ -1,0 +1,6 @@
+
+def idx_to_vec(i,j) 
+   %%% i is the stage you are in and j is the option (technically j_i)
+    return i + j
+end
+
