@@ -1,19 +1,14 @@
-using Optim, Plots, ForwardDiff
+using Optim, Plots, ForwardDiff, CurveFit
 
-function L_eps(ε, p)
+function L_smooth(ε, β, p)
     return ((1 - p) / (1 + p) * 1 / ε)^((1 - p) / (1 + p)) * β^(2 / (1 + p))
 end
 
-function get_rate(N, M, L, p, ε_set, type)
+function get_rate(N, L, ε_set)
     T = eltype(ε_set)  # determines if Float64 or Dual
+    ε_i_j = ε_set[1:N]
+    ε_star_i = ε_set[N+1:2*N+1]
 
-    if type == "same"
-        ε_i_j = ε_set[1] * ones(T, N)
-        ε_star_i = ε_set[1] * ones(T, N + 1)
-    elseif type == "diff"
-        ε_i_j = ε_set[1:N]
-        ε_star_i = ε_set[N+1:2*N+1]
-    end
 
     if p == 1
         ε_i_j = zero(T) * ε_set[1:N]
@@ -24,14 +19,14 @@ function get_rate(N, M, L, p, ε_set, type)
     λ_star_i = zeros(T, N + 1)
     α_set = zeros(T, N + 1)
 
-    α_set[1] = 1 / L(ε_i_j[1], p) + 1 / L(ε_star_i[1], p)
+    α_set[1] = 1 / L(ε_i_j[1]) + 1 / L(ε_star_i[1])
     λ_i_j[1] = α_set[1]
     λ_star_i[1] = α_set[1]
 
 
     for k = 2:N
-        B = -(1 / L(ε_star_i[k], p) + 1 / L(ε_i_j[k], p))
-        C = -λ_i_j[k-1] * (1 / L(ε_i_j[k-1], p) + 1 / L(ε_i_j[k], p))
+        B = -(1 / L(ε_star_i[k]) + 1 / L(ε_i_j[k]))
+        C = -λ_i_j[k-1] * (1 / L(ε_i_j[k-1]) + 1 / L(ε_i_j[k]))
         λ_star_i[k] = 1 / 2 * (-B + sqrt(B^2 - 4 * C))
 
         λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
@@ -40,8 +35,8 @@ function get_rate(N, M, L, p, ε_set, type)
 
 
 
-    B = -1 / L(ε_star_i[N+1], p)
-    C = -λ_i_j[N] * 1 / L(ε_i_j[N], p)
+    B = -1 / L(ε_star_i[N+1])
+    C = -λ_i_j[N] * 1 / L(ε_i_j[N])
     λ_star_i[N+1] = 1 / 2 * (-B + sqrt(B^2 - 4 * C))
 
     α_set[N+1] = λ_star_i[N+1]
@@ -61,7 +56,7 @@ function get_rate(N, M, L, p, ε_set, type)
 
 end
 
-function get_H_val(N, M, L, p, ε_set)
+function get_H_val(N, L, ε_set)
     ε_i_j = ε_set[1:N] # [ε_0_1, ε_1_2, ..., ε_{N-1}_N]
     ε_star_i = ε_set[N+1:2*N+1]
 
@@ -70,14 +65,14 @@ function get_H_val(N, M, L, p, ε_set)
     λ_star_i = zeros(N + 1)
 
     α_set = zeros(N + 1)
-    α_set[1] = 1 / L(ε_i_j[1], p) + 1 / L(ε_star_i[1], p)
+    α_set[1] = 1 / L(ε_i_j[1]) + 1 / L(ε_star_i[1])
     λ_i_j[1] = α_set[1]
     λ_star_i[1] = α_set[1]
 
 
     for k = 2:N
-        B = -(1 / L(ε_star_i[k], p) + 1 / L(ε_i_j[k], p))
-        C = -λ_i_j[k-1] * (1 / L(ε_i_j[k-1], p) + 1 / L(ε_i_j[k], p))
+        B = -(1 / L(ε_star_i[k]) + 1 / L(ε_i_j[k]))
+        C = -λ_i_j[k-1] * (1 / L(ε_i_j[k-1]) + 1 / L(ε_i_j[k]))
         λ_star_i[k] = 1 / 2 * (-B + sqrt(B^2 - 4 * C))
 
         λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
@@ -86,8 +81,8 @@ function get_H_val(N, M, L, p, ε_set)
 
 
 
-    B = -1 / L(ε_star_i[N+1], p)
-    C = -λ_i_j[N] * 1 / L(ε_i_j[N], p)
+    B = -1 / L(ε_star_i[N+1])
+    C = -λ_i_j[N] * 1 / L(ε_i_j[N])
     λ_star_i[N+1] = 1 / 2 * (-B + sqrt(B^2 - 4 * C))
 
     α_set[N+1] = λ_star_i[N+1]
@@ -98,9 +93,9 @@ function get_H_val(N, M, L, p, ε_set)
     for i in 1:N
         for j in 1:i
             if i == j
-                H_certificate[i, j] = (λ_i_j[i] + L(ε_i_j[i], p) * α_set[i] * α_set[i+1]) / (L(ε_i_j[i], p) * (λ_i_j[i] + λ_star_i[i+1])) * β
+                H_certificate[i, j] = (λ_i_j[i] + L(ε_i_j[i]) * α_set[i] * α_set[i+1]) / (L(ε_i_j[i]) * (λ_i_j[i] + λ_star_i[i+1]))
             else
-                H_certificate[i, j] = (α_set[i+1] * α_set[j] - 1 / β * λ_star_i[i+1] * sum([H_certificate[k, j] for k in j:i-1])) / (λ_i_j[i] + λ_star_i[i+1]) * β
+                H_certificate[i, j] = (α_set[i+1] * α_set[j] - 1 * λ_star_i[i+1] * sum([H_certificate[k, j] for k in j:i-1])) / (λ_i_j[i] + λ_star_i[i+1])
             end
         end
     end
@@ -111,11 +106,106 @@ function get_H_val(N, M, L, p, ε_set)
     return H_certificate
 end
 
-function run_N_opti(N, R, β, p, printing, type)
+function get_lambda(N, L, ε_set)
+    T = eltype(ε_set)  # determines if Float64 or Dual
+
+
+    ε_i_j = ε_set[1:N]
+    ε_star_i = ε_set[N+1:2*N+1]
+
+
+    if p == 1
+        ε_i_j = zero(T) * ε_set[1:N]
+        ε_star_i = zero(T) * ε_set[N+1:2*N+1]
+    end
+
+    λ_i_j = zeros(T, N)
+    λ_star_i = zeros(T, N + 1)
+    α_set = zeros(T, N + 1)
+
+    α_set[1] = 1 / L(ε_i_j[1]) + 1 / L(ε_star_i[1])
+    λ_i_j[1] = α_set[1]
+    λ_star_i[1] = α_set[1]
+
+
+    for k = 2:N
+        B = -(1 / L(ε_star_i[k]) + 1 / L(ε_i_j[k]))
+        C = -λ_i_j[k-1] * (1 / L(ε_i_j[k-1]) + 1 / L(ε_i_j[k]))
+        λ_star_i[k] = 1 / 2 * (-B + sqrt(B^2 - 4 * C))
+
+        λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
+        α_set[k] = λ_star_i[k]
+    end
+
+
+
+    B = -1 / L(ε_star_i[N+1])
+    C = -λ_i_j[N] * 1 / L(ε_i_j[N])
+    λ_star_i[N+1] = 1 / 2 * (-B + sqrt(B^2 - 4 * C))
+
+    α_set[N+1] = λ_star_i[N+1]
+
+
+
+    λ_certificate = [λ_i_j; λ_star_i]
+
+
+    return λ_certificate
+
+
+end
+
+function get_H_guess(N, L, ε_set)
+    λ_set = get_lambda(N, L, ε_set)
+    λ_i = λ_set[1:N]
+    λ_star = λ_set[N+1:2*N+1]
+    H_guess = zeros(N, N)
+
+
+    for i = 1:N
+        for j = 1:i
+
+            if j == i
+                H_guess[i, j] = (λ_i[i] + L(ε_set[i]) * λ_star[i] * λ_star[i+1]) / ((λ_i[i] + λ_star[i+1]) * L(ε_set[i]))
+            end
+
+            if j == i - 1
+                H_guess[i, j] = (λ_star[i+1] * λ_i[i-1]) / (λ_star[i] * (λ_i[i] + λ_star[i+1])) * (H_guess[i-1, i-1] - 1 / (L(ε_set[i-1])))
+
+            end
+
+            if j < i - 1
+                H_guess[i, j] = λ_star[i+1] / (λ_i[i] + λ_star[i+1]) * (λ_i[i-1]) / λ_star[i] * H_guess[i-1, j]
+            end
+        end
+    end
+    
+    # for i = 1:N-1  # uses the fact that for i < N, then λ_i[i] + λ_star[i+1] = λ_i[i+1], can combine all into one method
+    #     for j = 1:i 
+
+    #         if j == i 
+    #             H_guess[i,j] = (λ_i[i] + L_eps(min_ε[i],p)*λ_star[i]*λ_star[i+1])/(λ_i[i+1] * L_eps(min_ε[i],p))
+    #         end
+
+    #         if j == i-1
+    #             H_guess[i,j] = (λ_star[i+1] * λ_i[i-1])/(λ_star[i] * λ_i[i+1]) * (H_guess[i-1,i-1]-1/(L_eps(min_ε[i-1],p) )) 
+
+    #         end
+
+    #         if j < i-1
+    #             H_guess[i,j] = λ_star[i+1]/λ_i[i+1] * (λ_i[i-1])/λ_star[i] * H_guess[i-1,j]
+    #         end
+    #     end
+    # end
+
+    return H_guess
+end
+
+function run_N_opti(N, L)
     M = 2 * N + 1
     lower = 0.00000000001 * ones(M)
     upper = 3 * ones(M)
-    initial_vals = 0.3 * ones(M)
+    initial_vals = 0.03 * ones(M)
 
     options = Optim.Options(
         iterations=2500,
@@ -124,107 +214,19 @@ function run_N_opti(N, R, β, p, printing, type)
         time_limit=60,
         show_trace=false,
     )
-    f = ε_set -> get_rate(N, M, L_eps, p, ε_set, type)
+    f = ε_set -> get_rate(N, L, ε_set)
     g! = (G, x) -> (G[:] = ForwardDiff.gradient(f, x))
-    result = Optim.optimize(f, lower, upper, initial_vals, Fminbox(NelderMead()), options)
-    if type == "same"
-        min_ε = Optim.minimizer(result)[1] .* (ones(M))
-    elseif type == "diff"
-        min_ε = Optim.minimizer(result)
-    end
+    result = Optim.optimize(f, g!, lower, upper, initial_vals, Fminbox(BFGS()), options)
 
     rate = Optim.minimum(result)
-    H_val = get_H_val(N, M, L_eps, p, min_ε)
+    min_ε = Optim.minimizer(result)
+    H_val = get_H_val(N, L_eps, min_ε)
 
-    if printing == "1"
-        println("Minimizer:")
-        display(min_ε)
-
-        println()
-        println("with minimum rate:")
-        display(rate)
-
-        println()
-        println("and optimal step size H = ")
-        display(H_val)
-    end
 
     return min_ε, rate, H_val
 end
 
-function plot_p_rates(R, β, k, plotting_type)
-    plot(title="β = $β, R = $R, plotting: $plotting_type")
-    X = LinRange(0.001, 1, k)
-    Y1 = zeros(k)
-    Y2 = zeros(k)
-    ε_sets1 = zeros(k)
-    ε_sets2 = zeros(k, M)
-
-    for (cnt, p) in enumerate(X)
-        min_ε1, Y1[cnt], H_val = run_N_opti(N, R, β, p, 0, "same") # PRINTING OFF
-        min_ε2, Y2[cnt], H_val = run_N_opti(N, R, β, p, 0, "diff") # PRINTING OFF
-
-        ε_sets1[cnt] = min_ε1[1]
-        ε_sets2[cnt, :] = min_ε2
-
-        if mod(cnt, k / 5) == 0
-            display(cnt)
-        end
-    end
-
-    if plotting_type == "epsilons"
-        plot!(X, ε_sets2, labels=["ε_0_1" "ε_1_2" "ε_star_0" "ε_star_1" "ε_star_2"])
-        plot!(X, ε_sets1[:, 1], linestyle=:dash, labels="ε_same")
-
-
-    elseif plotting_type == "Rates"
-        plot!(X, Y1, labels="same ε")
-        plot!(X, Y2, labels="different ε")
-
-    end
-
-    return ε_sets2
-
-end
-
-
-function plot_N_rates(R, β, p, k, plotting_type)
-    plot(title="β = $β, R = $R, p = $p, plotting: $plotting_type")
-    X = 1:k
-    Y1 = zeros(k)
-    Y2 = zeros(k)
-
-
-    for (cnt, N) in enumerate(X)
-
-        min_ε1, Y1[cnt], H_val = run_N_opti(N, R, β, p, 0, "same") # PRINTING OFF
-         min_ε2, Y2[cnt], H_val = run_N_opti(N, R, β, p, 0, "diff") # PRINTING OFF
-
-        if mod(N,10) == 0
-        println("trial: $N")
-        end
-
-
-    end
-
-    if plotting_type == "epsilons"
-        plot!(X, ε_sets2, labels=["ε_0_1" "ε_1_2" "ε_star_0" "ε_star_1" "ε_star_2"])
-        plot!(X, ε_sets1[:, 1], linestyle=:dash, labels="ε_same")
-
-
-    elseif plotting_type == "Rates"
-        plot!(X, Y1, labels="same ε", xaxis=:log, yaxis=:log)
-         plot!(X, Y2, labels="different ε",  xaxis=:log, yaxis=:log)
-
-    end
-
-
-
-end
-
-
 function OGM_rates(β, R, N)
-
     theta = 1
     rate = []
     for i in 0:N-1
@@ -240,53 +242,12 @@ function OGM_rates(β, R, N)
     return rate
 end
 
+N = 8
+β = 0.2
+p = 1
+R = 3
+L_eps = ε -> L_smooth(ε, β, p)
 
-function get_diff_opt(β, R, k, N)
-    plot(title="β = $β, R = $R")
-    p_range = LinRange(1e-6,1-1e-6,k)
-    coeffs = zeros(k)
+min_ε, rate, H_val = run_N_opti(N, L_eps)
+H_guess = get_H_guess(N, L_eps, min_ε)
 
-
-    for (cnt, p) in enumerate(p_range)
-
-        _, rate, _ = run_N_opti(N, R, β, p, 0, "diff") # PRINTING OFF
-
-
-        println("Computing coeff for p = $p")
-
-
-        coeffs[cnt] = rate/(β*R^(p+1))*N^((3*p+1)/2)
-
-    end
-
-    plot!(p_range, coeffs)
-    return p_range, coeffs
-end
-
-R = 1
-β = 1
-k = 50 # number of points to test
-N  = 3
-M = 2*N+1
-
-plotting_type = "epsilons" # choose "epsilons" or "Rates"
-ε_sets2 = plot_p_rates(R, β, k, plotting_type)
-
-# p_range, coeffs = get_diff_opt(β, R, k, N)
-
-# p = 1
-# if p == 1
-#     X_range = 1:k
-
-#     Y_range = []
-#     for i = 1:k
-#         push!(Y_range, OGM_rates(β, R, i)[i]) # last iterate different for OGM
-#     end
-# else
-#     X_range = LinRange(1, k, 20)
-
-#     Y_range = β * R^(1 + p) ./ ((X_range .+ 1) .^ ((1 + 3 * p) / 2)) # add +1 to match subgrad method
-#     # is the rate of βR/sqrt(T+1) not optimal up to coeffs?
-# end
-# plot_N_rates(R, β, p, k, plotting_type)
-# plot!(X_range, Y_range, xaxis=:log, yaxis=:log)

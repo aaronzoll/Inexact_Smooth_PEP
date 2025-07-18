@@ -1,4 +1,4 @@
-using JuMP, MosekTools, Mosek, Plots, Random, Revise, Ipopt, Optim, CurveFit
+using JuMP, MosekTools, Mosek, Plots, Random, Revise, Ipopt, Optim, CurveFit, JLD2
 
 
 function get_rate_Lip(N, β, ε_set)
@@ -14,15 +14,15 @@ function get_rate_Lip(N, β, ε_set)
     λ_star_i[1] = α_set[1]
 
     for k = 2:N
-        B = -ε_i_j[k]
-        C = -λ_i_j[k-1] * (ε_i_j[k-1] + ε_i_j[k])
-        λ_star_i[k] = (-B + sqrt(B^2 - 4 * C)) / (2 * β^2)
+        B = -ε_i_j[k]/β^2
+        C = -λ_i_j[k-1] * (ε_i_j[k-1]/β^2 + ε_i_j[k]/β^2)
+        λ_star_i[k] = (-B + sqrt(B^2 - 4 * C)) / (2)
 
         λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
         α_set[k] = λ_star_i[k]
     end
 
-    λ_star_i[N+1] = sqrt(λ_i_j[N] * ε_i_j[N]) / β^2
+    λ_star_i[N+1] = sqrt(λ_i_j[N] * ε_i_j[N]/β^2) 
     α_set[N+1] = λ_star_i[N+1]
 
 
@@ -39,7 +39,7 @@ function run_N_opti(N, β)
     lower = 0.00000000001 * ones(N)
     upper = 3 * ones(N)
     initial_vals = 0.3 * ones(N)
-    iter_print_freq = 100
+    iter_print_freq = 500
 
     function my_callback(state)
 
@@ -56,9 +56,9 @@ function run_N_opti(N, β)
     end
 
     options = Optim.Options(
-        iterations=2500,
-        f_tol=1e-8,
-        x_tol=1e-8,
+        iterations=5000,
+        f_tol=1e-10,
+        x_tol=1e-10,
         time_limit=60,
         show_trace=false,
         callback=my_callback
@@ -86,12 +86,16 @@ end
 
 
 # === Run Example ===
-N = 51
+
+# for given key "N" saves (a_odd, b_odd, a_even, b_even)
+# where for "odd epsilons" i.e. ε_{2i,2i+1} has relationship
+# a_odd * N^b_odd and evens have a_even + b_even * N
+# results = Dict{Int, Any}() 
 
 
+N = 13
 β = 1
-L_eps = make_L_eps(β)
-R = 1
+R = 0.3
 
 # compute OGM sparsity optimal epsilons
 min_ε_sparse, rate_sparse = run_N_opti(N, β)
@@ -112,4 +116,7 @@ a_even, b_even = linear_fit(evens_x, evens)
 x_range = LinRange(1, N, 1000)
 plot!(x_range, @. a_odd * x_range^b_odd)
 plot!(x_range, @. a_even + b_even * x_range)
+
+#   results[N] = (a_odd, b_odd, a_even, b_even)
+
 
