@@ -32,6 +32,5 @@ function get_vector(N)
     return vec_lower
 end
 
-N = 2
+N = 5
 OGM = compute_H(N)
-vec_lower = get_vector(N)

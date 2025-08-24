@@ -1,7 +1,7 @@
-using JuMP, MosekTools, Mosek, Plots, Random, Revise, Ipopt, Optim
+using JuMP, MosekTools, Mosek, Random, Revise, Ipopt, Optim
 
-function solve_convex_program(ε, ε_star, L, R)
-    N = length(ε_star) - 1
+function solve_convex_program(δ, δ_star, L, R)
+    N = length(δ_star) - 1
     model = Model(Mosek.Optimizer)
 
     set_silent(model)
@@ -13,8 +13,8 @@ function solve_convex_program(ε, ε_star, L, R)
 
     @objective(model, Min,
         0.5 * R^2 * t +
-        sum(λ[i,j] * ε[i+1,j+1]/2 for i in 0:N, j in 0:N) +
-        sum(α[i] * ε_star[i+1]/2 for i in 0:N)
+        sum(λ[i,j] * δ[i+1,j+1]/2 for i in 0:N, j in 0:N) +
+        sum(α[i] * δ_star[i+1]/2 for i in 0:N)
     )
 
     for i in 0:N
@@ -34,8 +34,8 @@ function solve_convex_program(ε, ε_star, L, R)
     @constraint(model, sum(λ[i,N] for i in 0:N-1) == sum(α[0:N-1]))
 
     for j in 0:N
-        sum_term = sum(-λ[i,j]/L(ε[i+1,j+1]) - λ[j,i]/L(ε[j+1,i+1]) for i in 0:N)
-        linear_term = -α[j]/L(ε_star[j+1])
+        sum_term = sum(-λ[i,j]/L(δ[i+1,j+1]) - λ[j,i]/L(δ[j+1,i+1]) for i in 0:N)
+        linear_term = -α[j]/L(δ_star[j+1])
         @constraint(model, sum_term + linear_term + 1/2*s[j] <= 0)
 
         @constraint(model, [t; s[j]; 2*α[j]] in MOI.RotatedSecondOrderCone(3))
@@ -48,31 +48,31 @@ function solve_convex_program(ε, ε_star, L, R)
     return objective_value(model), value(t), value.(λ), value.(α)
 end
 
-function get_rate(N, M, L, p, ε_set)
-    T = eltype(ε_set)  # determines if Float64 or Dual
+function get_rate(N, M, L, p, δ_set)
+    T = eltype(δ_set)  # determines if Float64 or Dual
 
 
-        ε_i_j = ε_set[1:N]
-        ε_star_i = ε_set[N+1:2*N+1]
+        δ_i_j = δ_set[1:N]
+        δ_star_i = δ_set[N+1:2*N+1]
 
 
     if p == 1
-        ε_i_j = zero(T) * ε_set[1:N]
-        ε_star_i = zero(T) * ε_set[N+1:2*N+1]
+        δ_i_j = zero(T) * δ_set[1:N]
+        δ_star_i = zero(T) * δ_set[N+1:2*N+1]
     end
 
     λ_i_j = zeros(T, N)
     λ_star_i = zeros(T, N + 1)
     α_set = zeros(T, N + 1)
 
-    α_set[1] = 1 / L(ε_i_j[1]) + 1 / L(ε_star_i[1])
+    α_set[1] = 1 / L(δ_i_j[1]) + 1 / L(δ_star_i[1])
     λ_i_j[1] = α_set[1]
     λ_star_i[1] = α_set[1]
 
 
     for k = 2:N
-        B = -(1 / L(ε_star_i[k]) + 1 / L(ε_i_j[k],))
-        C = -λ_i_j[k-1] * (1 / L(ε_i_j[k-1]) + 1 / L(ε_i_j[k]))
+        B = -(1 / L(δ_star_i[k]) + 1 / L(δ_i_j[k],))
+        C = -λ_i_j[k-1] * (1 / L(δ_i_j[k-1]) + 1 / L(δ_i_j[k]))
         λ_star_i[k] = 1 / 2 * (-B + sqrt(B^2 - 4 * C))
 
         λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
@@ -81,8 +81,8 @@ function get_rate(N, M, L, p, ε_set)
 
 
 
-    B = -1 / L(ε_star_i[N+1])
-    C = -λ_i_j[N] * 1 / L(ε_i_j[N])
+    B = -1 / L(δ_star_i[N+1])
+    C = -λ_i_j[N] * 1 / L(δ_i_j[N])
     λ_star_i[N+1] = 1 / 2 * (-B + sqrt(B^2 - 4 * C))
 
     α_set[N+1] = λ_star_i[N+1]
@@ -90,9 +90,9 @@ function get_rate(N, M, L, p, ε_set)
 
 
     τ = λ_star_i[N+1] + λ_i_j[N]
-    ε_certificate = [ε_i_j; ε_star_i]
+    δ_certificate = [δ_i_j; δ_star_i]
     λ_certificate = [λ_i_j; λ_star_i]
-    σ = 1 / 2 * ε_certificate' * λ_certificate
+    σ = 1 / 2 * δ_certificate' * λ_certificate
 
     rate = (1 / 2 * R^2 + σ) / τ
 
@@ -132,16 +132,16 @@ function run_N_opti(N, p)
         callback = my_callback
     )
 
-    f = ε_set -> get_rate(N, M, L_eps, p, ε_set)
+    f = δ_set -> get_rate(N, M, L_eps, p, δ_set)
     result = Optim.optimize(f, lower, upper, initial_vals, Fminbox(NelderMead()), options)
 
-    min_ε = Optim.minimizer(result)
+    min_δ = Optim.minimizer(result)
 
 
     rate = Optim.minimum(result)
 
 
-    return min_ε, rate
+    return min_δ, rate
 end
 
 function solve_convex_program_OGM()
@@ -183,8 +183,8 @@ function solve_convex_program_OGM()
 end
 
 function run_wizard_opti(N, p, L, R)
-    M_eps = (N + 1)^2             # number of elements in ε matrix
-    M_star = N + 1                # number of elements in ε_star
+    M_eps = (N + 1)^2             # number of elements in δ matrix
+    M_star = N + 1                # number of elements in δ_star
     M = M_eps + M_star            # total number of optimization variables
 
     lower = 1e-10 * ones(M)
@@ -217,20 +217,20 @@ function run_wizard_opti(N, p, L, R)
     )
 
     f = function(x)
-        ε_flat = x[1:M_eps]
-        ε_star = x[M_eps+1:end]
+        δ_flat = x[1:M_eps]
+        δ_star = x[M_eps+1:end]
 
-        ε = reshape(ε_flat, N+1, N+1)
-        obj_val, _, _, _ = solve_convex_program(ε, ε_star, L, R)
+        δ = reshape(δ_flat, N+1, N+1)
+        obj_val, _, _, _ = solve_convex_program(δ, δ_star, L, R)
         return obj_val
     end
 
     result = Optim.optimize(f, lower, upper, initial_vals, Fminbox(NelderMead()), options)
 
     x_opt = Optim.minimizer(result)
-    ε_opt = reshape(x_opt[1:M_eps], N+1, N+1)
-    ε_star_opt = x_opt[M_eps+1:end]
+    δ_opt = reshape(x_opt[1:M_eps], N+1, N+1)
+    δ_star_opt = x_opt[M_eps+1:end]
     rate = Optim.minimum(result)
 
-    return ε_opt, ε_star_opt, rate
+    return δ_opt, δ_star_opt, rate
 end

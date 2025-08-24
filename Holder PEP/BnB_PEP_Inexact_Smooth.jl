@@ -1,6 +1,6 @@
 ## Load the packages:
 # -------------------
-using JuMP, MosekTools, Mosek, LinearAlgebra, OffsetArrays, Gurobi, Ipopt, JLD2, Distributions, OrderedCollections, BenchmarkTools
+using JuMP, MosekTools, Mosek, LinearAlgebra, OffsetArrays, Gurobi, Ipopt, JLD2, Distributions, OrderedCollections, BenchmarkTools, Optim
 
 ## Load the pivoted Cholesky finder
 # ---------------------------------
@@ -868,3 +868,13 @@ function L_eps_p(ε,p)
     return ((1 - p) / (1 + p) * 1 / ε)^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
 
 end
+
+
+N = 1
+L = 1
+R = 1
+p = 1
+M = 2*N + 1
+initial_vals = 0.1*ones(2*M+1)
+sparsity_pattern = "OGM"
+ε_set, H, result, terminated_early = Optimize(N, L, R, p, M, initial_vals, sparsity_pattern, 1000, 60)

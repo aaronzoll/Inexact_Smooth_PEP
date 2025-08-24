@@ -718,16 +718,15 @@ function solve_primal_with_known_stepsizes(N, μ, L, α, R; show_output = :off)
 end
 
 
-# μ = 0.1
-# L = 1
-# N = 2
-# R = 1
-# h_test, α_test = feasible_h_α_generator(N, μ, L; step_size_type = :Default)
-# # h_test = h_ITEM_generator(N, μ, L)
-# # α_test = compute_α_from_h(h_test, N, μ, L)
-#
-# p_star_feas_1, G_star_feas_1, Ft_star_feas_1 = solve_primal_with_known_stepsizes(N, μ, L, α_test, R; show_output = :on)
+μ = 0
+L = 1
+N = 9
+R = 1
+h_test, α_test = feasible_h_α_generator(N, μ, L; step_size_type = :Default)
 
+
+p_star_feas_1, G_star_feas_1, Ft_star_feas_1 = solve_primal_with_known_stepsizes(N, μ, L, α_test, R; show_output = :off)
+display(p_star_feas_1)
 # Comment: it seems to be working just fine 😸
 
 

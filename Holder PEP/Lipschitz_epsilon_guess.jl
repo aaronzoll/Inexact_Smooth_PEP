@@ -1,59 +1,59 @@
 using Plots, LinearAlgebra
-function get_rate_Lip(N, β, ε_set)
-    ε_i_j = ε_set[1:N]
+function get_rate_Lip(N, β, δ_set)
+    δ_i_j = δ_set[1:N]
 
     λ_i_j = zeros(N)
     λ_star_i = zeros(N + 1)
     α_set = zeros(N + 1)
 
-    α_set[1] = ε_i_j[1] / β^2
+    α_set[1] = δ_i_j[1] / β^2
     λ_i_j[1] = α_set[1]
     λ_star_i[1] = α_set[1]
 
     for k = 2:N
-        B = -ε_i_j[k] / β^2
-        C = -λ_i_j[k-1] * (ε_i_j[k-1] / β^2 + ε_i_j[k] / β^2)
+        B = -δ_i_j[k] / β^2
+        C = -λ_i_j[k-1] * (δ_i_j[k-1] / β^2 + δ_i_j[k] / β^2)
         λ_star_i[k] = (-B + sqrt(B^2 - 4 * C)) / (2)
 
         λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
         α_set[k] = λ_star_i[k]
     end
 
-    λ_star_i[N+1] = sqrt(λ_i_j[N] * ε_i_j[N] / β^2)
+    λ_star_i[N+1] = sqrt(λ_i_j[N] * δ_i_j[N] / β^2)
     α_set[N+1] = λ_star_i[N+1]
 
 
     τ = λ_star_i[N+1] + λ_i_j[N]
-    ε_certificate = [ε_i_j; zeros(N + 1)]
+    δ_certificate = [δ_i_j; zeros(N + 1)]
     λ_certificate = [λ_i_j; λ_star_i]
-    σ = 1 / 2 * ε_certificate' * λ_certificate
+    σ = 1 / 2 * δ_certificate' * λ_certificate
 
     rate = (1 / 2 * R^2 + σ) / τ
     return rate, λ_certificate, α_set
 end
 
 
-function get_H_val(N, β, ε_set, λ_set, α_set)
-    ε_i_j = ε_set[1:N]
+function get_H_val(N, β, δ_set, λ_set, α_set)
+    δ_i_j = δ_set[1:N]
 
     λ_i_j = zeros(N)
     λ_star_i = zeros(N + 1)
     α_set = zeros(N + 1)
 
-    α_set[1] = ε_i_j[1] / β^2
+    α_set[1] = δ_i_j[1] / β^2
     λ_i_j[1] = α_set[1]
     λ_star_i[1] = α_set[1]
 
     for k = 2:N
-        B = -ε_i_j[k] / β^2
-        C = -λ_i_j[k-1] * (ε_i_j[k-1] / β^2 + ε_i_j[k] / β^2)
+        B = -δ_i_j[k] / β^2
+        C = -λ_i_j[k-1] * (δ_i_j[k-1] / β^2 + δ_i_j[k] / β^2)
         λ_star_i[k] = (-B + sqrt(B^2 - 4 * C)) / (2)
 
         λ_i_j[k] = λ_i_j[k-1] + λ_star_i[k]
         α_set[k] = λ_star_i[k]
     end
 
-    λ_star_i[N+1] = sqrt(λ_i_j[N] * ε_i_j[N] / β^2)
+    λ_star_i[N+1] = sqrt(λ_i_j[N] * δ_i_j[N] / β^2)
     α_set[N+1] = λ_star_i[N+1]
 
     H_certificate = zeros(N, N)
@@ -61,7 +61,7 @@ function get_H_val(N, β, ε_set, λ_set, α_set)
     for i in 1:N
         for j in 1:i
             if i == j
-                H_certificate[i, j] = (ε_i_j[i] * λ_i_j[i] / β^2 + α_set[i] * α_set[i+1]) / (λ_i_j[i] + λ_star_i[i+1]) * β
+                H_certificate[i, j] = (δ_i_j[i] * λ_i_j[i] / β^2 + α_set[i] * α_set[i+1]) / (λ_i_j[i] + λ_star_i[i+1]) * β
             else
                 H_certificate[i, j] = (α_set[i+1] * α_set[j] - 1 / β * λ_star_i[i+1] * sum([H_certificate[k, j] for k in j:i-1])) / (λ_i_j[i] + λ_star_i[i+1]) * β
             end
@@ -130,32 +130,32 @@ function subgrad_max_with_zero(v::AbstractVector{<:Real})
     end
 end
 
-function compute_Q_ij(x_i, x_j, ε_i_j)
+function compute_Q_ij(x_i, x_j, δ_i_j)
     f_i = max_with_zero(x_i)
     f_j = max_with_zero(x_j)
 
     g_i = subgrad_max_with_zero(x_i)
     g_j = subgrad_max_with_zero(x_j)
 
-    return f_i - f_j - g_j' * (x_i - x_j) - ε_i_j / (2 * β^2) * norm(g_i - g_j)^2 + ε_i_j / (2)
+    return f_i - f_j - g_j' * (x_i - x_j) - δ_i_j / (2 * β^2) * norm(g_i - g_j)^2 + δ_i_j / (2)
 end
 
-function compute_ε_set(N)
-    ε_set = zeros(N)
+function compute_δ_set(N)
+    δ_set = zeros(N)
 
     for i = 1:N
         if i % 2 == 1
-            ε_set[i] = β * R * sqrt(2) * (N + 1)^-0.5 / (i)
+            δ_set[i] = β * R * sqrt(2) * (N + 1)^-0.5 / (i)
 
         else
-            #  ε_set[i] = max(0,(-1.33*10^-5 - 8.2*10^-7*N)*i + (0.00005*N-0.0002))
-            ε_set[i] = 0
+            #  δ_set[i] = max(0,(-1.33*10^-5 - 8.2*10^-7*N)*i + (0.00005*N-0.0002))
+            δ_set[i] = 0
         end
 
 
     end
 
-    return ε_set
+    return δ_set
 end
 
 # X = 7:3:K
@@ -163,20 +163,20 @@ end
 # for N = X
 #     global β = 50
 #     global R = 1
-#     local ε_set = zeros(N)
+#     local δ_set = zeros(N)
 #     for i = 1:N
 #         if i % 2 == 1
-#             ε_set[i] = β * R* sqrt(2)*(N+1)^-0.5 / (i)
+#             δ_set[i] = β * R* sqrt(2)*(N+1)^-0.5 / (i)
 
 #         else
-#           #  ε_set[i] = max(0,(-1.33*10^-5 - 8.2*10^-7*N)*i + (0.00005*N-0.0002))
-#             ε_set[i] = 0
+#           #  δ_set[i] = max(0,(-1.33*10^-5 - 8.2*10^-7*N)*i + (0.00005*N-0.0002))
+#             δ_set[i] = 0
 #         end
 
 #     end
 
 
-#     rates[N]  =  get_rate_Lip(N, β, ε_set)
+#     rates[N]  =  get_rate_Lip(N, β, δ_set)
 
 # end
 
@@ -191,30 +191,32 @@ end
 # #plot(X, (rates[X].-1 ./sqrt(2).*β.*R./sqrt.(X.+1)), ylims = (-10*max_err,10*max_err), labels = "absolute error")
 # plot(X, (rates[X].-1 ./sqrt(2).*β.*R./sqrt.(X.+1))./(1/sqrt(2).*β.*R./sqrt.(X.+1)), labels = "relative error")
 
-N = 7
-global β = 1
+N = 19
+global β = 2
 global R = 1
 
-ε_set = compute_ε_set(N)
+δ_set = compute_δ_set(N)
 
+rate, λ_certificate, α_set = get_rate_Lip(N, β, δ_set)
+display(rate)
+display(sqrt(2)/2*β*R/sqrt(N+1))
+# function run_method(N, δ)
+#     M = Int(ceil(β * R/(2 * δ^2) - 1))
+#     display(M)
+#     x_0 = R/sqrt(N) * ones(N)
 
-function run_method(N, ε)
-    M = Int(ceil(β * R/(2 * ε^2) - 1))
-    display(M)
-    x_0 = R/sqrt(N) * ones(N)
+#     H_guess = compute_H_guess(M)
+#     x_set = zeros(N,M+1)
+#     x_set[:,1] = x_0
+#     grads = zeros(N,M+1)
+#     grads[:,1] = subgrad_max_with_zero(x_set[:,1])
+#     for i = 1:M
+#         x_set[:,i+1] = x_set[:,i] - sum(H_guess[i,k]*grads[:,k] for k = 1:i)
+#         grads[:,i+1] = subgrad_max_with_zero(x_set[:,i+1])
 
-    H_guess = compute_H_guess(M)
-    x_set = zeros(N,M+1)
-    x_set[:,1] = x_0
-    grads = zeros(N,M+1)
-    grads[:,1] = subgrad_max_with_zero(x_set[:,1])
-    for i = 1:M
-        x_set[:,i+1] = x_set[:,i] - sum(H_guess[i,k]*grads[:,k] for k = 1:i)
-        grads[:,i+1] = subgrad_max_with_zero(x_set[:,i+1])
+#     end
 
-    end
+#     return x_0, x_set, grads
+# end
 
-    return x_0, x_set, grads
-end
-
-x_0, x_set, grads = run_method(N, H_guess, 0.1)
+# x_0, x_set, grads = run_method(N, H_guess, 0.1)

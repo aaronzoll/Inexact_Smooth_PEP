@@ -3,7 +3,7 @@ include("BnB_PEP_Inexact_Smooth.jl")
 
 using Optim, OffsetArrays
 
-export OptimizationProblem, optimize_ε_h, get_H
+export OptimizationProblem, optimize_δ_h, get_H
 
 struct OptimizationProblem
     N::Int
@@ -65,14 +65,14 @@ function run_batch(prob::OptimizationProblem, args)
             cnt += 1
         end
     end
-    ε_set = args[1:k]
+    δ_set = args[1:k]
     μ = 0
     α = compute_α_from_h(prob, H, μ)
-    Y, _, _ = solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ; show_output=:off)
+    Y, _, _ = solve_primal_with_known_stepsizes_batch(N, L, α, R, δ_set, p, μ; show_output=:off)
     return Y
 end
 
-function optimize_ε_h(N, L, R, p, k, max_iter, max_time, lower, upper, initial_vals)
+function optimize_δ_h(N, L, R, p, k, max_iter, max_time, lower, upper, initial_vals)
 
     prob = OptimizationProblem(N, L, R, p, k)
    

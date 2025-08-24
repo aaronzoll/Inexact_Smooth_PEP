@@ -1,36 +1,36 @@
-using Plots, Random, Revise
+using Random, Revise
 
 include("wizardry_solver.jl")
 
 function make_L_eps(β, p)
-    return ε ->  ((1 - p)/(1 + p) * 1/ε)^((1 - p)/(1 + p)) * β^(2/(1 + p))  #nonsmooth + smooth + HS
+    return δ ->  ((1 - p)/(1 + p) * 1/δ)^((1 - p)/(1 + p)) * β^(2/(1 + p))  #nonsmooth + smooth + HS
 end
 
 # === Run Example ===
 N = 4
-ε = zeros(N+1, N+1)
-ε_star = zeros(N+1)
+δ = zeros(N+1, N+1)
+δ_star = zeros(N+1)
 β = 1
 p = 0.00000001
 L_eps = make_L_eps(β, p)
 R = 1
 
 # compute OGM sparsity optimal epsilons
-min_ε_sparse, rate_sparse = run_N_opti(N, p)
-display(min_ε_sparse)
+min_δ_sparse, rate_sparse = run_N_opti(N, p)
+display(min_δ_sparse)
 display(rate_sparse)
 # # set those for Wizard run (just for sanity check)
 # for i = 1:N
-#     ε[i,i+1] = min_ε_sparse[i]
-#     ε_star[i] = min_ε_sparse[N+i]
+#     δ[i,i+1] = min_δ_sparse[i]
+#     δ_star[i] = min_δ_sparse[N+i]
 # end
-# ε_star[N+1] = min_ε_sparse[2*N+1]
+# δ_star[N+1] = min_δ_sparse[2*N+1]
 
-# rate, t, λ, α = solve_convex_program(ε, ε_star, L_eps, R)
+# rate, t, λ, α = solve_convex_program(δ, δ_star, L_eps, R)
 
 # # optimize wizard run
-# ε_opt, ε_star_opt, rate2 = run_wizard_opti(N, p, L_eps, R)
-# rate_wizard, t1, λ1, α1 = solve_convex_program(ε_opt, ε_star_opt, L_eps, R)
+# δ_opt, δ_star_opt, rate2 = run_wizard_opti(N, p, L_eps, R)
+# rate_wizard, t1, λ1, α1 = solve_convex_program(δ_opt, δ_star_opt, L_eps, R)
 
 # display(rate_sparse)
 # display(rate)

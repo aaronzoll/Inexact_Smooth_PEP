@@ -10,8 +10,8 @@ function objective(p, x, y)
 end
 
 function run_lst_sqr(x_data, y_data)
-    ε = 1e-6
-    lower = [0, -minimum(x_data) + ε, 0]
+    δ = 1e-6
+    lower = [0, -minimum(x_data) + δ, 0]
     upper = [Inf, Inf, 3]
     p0 = [1.0, 1.0, 0.5]  # Initial guess
 
@@ -72,8 +72,8 @@ evens = 5:2:55
 a, b, c = run_lst_sqr(odds, odd_a_vec[odds])
 
 a1, b1 = linear_fit(evens, even_b_vec[evens])
-#scatter(odds, odd_a_vec[odds], labels="coeff for odd ε")
+#scatter(odds, odd_a_vec[odds], labels="coeff for odd δ")
 #plot!(odds, @. a * (odds + b)^-c)
-#scatter!(odds, odd_b_vec[odds], labels = "exponent for odd ε")
-scatter(evens, even_a_vec[evens], labels = "intercept for even ε")
-#scatter(evens, even_b_vec[evens], labels = "slope for even ε")
+#scatter!(odds, odd_b_vec[odds], labels = "exponent for odd δ")
+scatter(evens, even_a_vec[evens], labels = "intercept for even δ")
+#scatter(evens, even_b_vec[evens], labels = "slope for even δ")
