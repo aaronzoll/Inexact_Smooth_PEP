@@ -150,6 +150,7 @@ function compute_δ_set(N)
         else
             #  δ_set[i] = max(0,(-1.33*10^-5 - 8.2*10^-7*N)*i + (0.00005*N-0.0002))
             δ_set[i] = 0
+           #  δ_set[i] = β * R * sqrt(2) * (N + 1)^-0.5 / (i)
         end
 
 
@@ -191,7 +192,7 @@ end
 # #plot(X, (rates[X].-1 ./sqrt(2).*β.*R./sqrt.(X.+1)), ylims = (-10*max_err,10*max_err), labels = "absolute error")
 # plot(X, (rates[X].-1 ./sqrt(2).*β.*R./sqrt.(X.+1))./(1/sqrt(2).*β.*R./sqrt.(X.+1)), labels = "relative error")
 
-N = 19
+N = 21
 global β = 2
 global R = 1
 

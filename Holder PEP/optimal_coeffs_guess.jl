@@ -1,10 +1,10 @@
-using Plots, JLD2, Optim, ForwardDiff, CurveFit
+using Plots,  Optim, ForwardDiff, CurveFit, JLD2
 
 
  
 
 function L_smooth(ε, β, p)
-    return ((1 - p) / (1 + p) * 1 / ε)^((1 - p) / (1 + p)) * β^(2 / (1 + p))
+    return ((1 - p) / (1 + p) * 1 / (2*ε))^((1 - p) / (1 + p)) * β^(2 / (1 + p))
 end
 
 function get_rate(N, L, ε_set)
@@ -45,10 +45,11 @@ function get_rate(N, L, ε_set)
     τ = λ_star_i[N+1] + λ_i_j[N]
     ε_certificate = [ε_i_j; ε_star_i]
     λ_certificate = [λ_i_j; λ_star_i]
-    σ = 1 / 2 * ε_certificate' * λ_certificate
+    σ =  ε_certificate' * λ_certificate
 
     rate = (1 / 2 * R^2 + σ) / τ
-
+    φ = λ_i_j
+    ψ = λ_star_i
 
     return rate
 
@@ -122,8 +123,8 @@ function compute_ε_set(N, k, p)
 
     end
 
-    for i = 1:N+1
-        ε_set[N+i] = k3 * β * R^((1 + p)) * (N + 1)^(-(1 + p) / 2) * (i)^(-(1 + p))
+    for i = 0:N
+        ε_set[N+i+1] = k3 * β * R^((1 + p)) * (N + 1)^(-(1 + p) / 2) * (i+1)^(-(1 + p))
     end
 
     return ε_set
@@ -149,18 +150,35 @@ X2 = LinRange(0.0000001, 1, 200)
 coeffs2 = zeros(length(X2))
 for (cnt, p) in enumerate(X2)
     L_eps = ε -> L_smooth(ε, β, p)
-    k = [exp(p)*(-sqrt(2)*p^0.25+sqrt(2)), max(0,(5-p^(-1/4))*(p^(1/4)-p^(1/2))*p^p), max(0, 1/7*(p^(1/(25*p))-p^2))]
+    k = 1/2*[exp(p)*(-sqrt(2)*p^0.25+sqrt(2)), max(0,(5-p^(-1/4))*(p^(1/4)-p^(1/2))*p^p), max(0, 1/7*(p^(1/(25*p))-p^2))]
     ε_set = compute_ε_set(N, k, p)
     rate = get_rate(N, L_eps, ε_set)
     coeffs2[cnt] = rate/(β * R^(1+p) * N^(-(1+3*p)/2))
 end
 
 
-plot(ylims = ())
-scatter!(X,coeffs)
-scatter!(X2,coeffs2)
+
 X = collect(X2)
-scatter!(X, @. 2^((X+1)/2)*3^((X-1)/(2))/(1+X))
+# scatter!(X, @. 2^((X+1)/2)*3^((X-1)/(2))/(1+X))
+
+X3 = LinRange(0.0000001, 1, 200)
+coeffs3 = zeros(length(X2))
+for (cnt, p) in enumerate(X2)
+    L_eps = ε -> L_smooth(ε, β, p)
+    r = (1-p)/(1+p)
+    k_star = (4/(r*(p+1)^2 * (r/2)^r))^(-1/(1+r))
+    k = [k_star, k_star, 0.0000000001]
+    ε_set = compute_ε_set(N, k, p)
+    rate = get_rate(N, L_eps, ε_set)
+    coeffs3[cnt] = rate/(β * R^(1+p) * N^(-(1+3*p)/2))
+end
+
+plot(ylims = ())
+#scatter!(X,coeffs)
+scatter!(X2,coeffs2)
+scatter!(X3, coeffs3)
+scatter!(X3, @. (X3+1)^(X3)/2^((1+X3)/2))
+#scatter!(X3, coeffs3-coeffs2)
 #scatter!(X3, coeffs3)
 # @load "coeffs_epsilons_guess_zoom.jld2"
 
@@ -208,3 +226,24 @@ scatter!(X, @. 2^((X+1)/2)*3^((X-1)/(2))/(1+X))
 # scatter!(X2, coeffs2)
 # scatter!(X3, coeffs3)
 # scatter!(X4[1:100], coeffs4[1:100])
+
+
+
+X4 = collect(3:500)
+coeffs4 = zeros(length(X4))
+β = 1
+p = 0.9
+r = (1-p)/(1+p)
+L_eps = ε -> L_smooth(ε, β, p)
+k_star = (4/(r*(p+1)^2 * (r/2)^r))^(-1/(1+r))
+k = [k_star, k_star, 0.0000000001]
+
+for (cnt, N) in enumerate(X4)   
+    ε_set = compute_ε_set(N, k, p)
+    rate = get_rate(N, L_eps, ε_set)
+    coeffs4[cnt] = rate/(β * R^(1+p) * N^(-(1+3*p)/2))
+end
+
+plot()
+scatter!(X4, coeffs4)
+plot!(X4, (p+1)^p/(2)^((p+1)/2)*ones(length(X4)))
