@@ -27,7 +27,12 @@ end
 function solve_fractional_conic(N, R, κ, q;
     t_lower=1e-12, λ_lower=1e-12, s_lower=1e-12,
     show_output=:off, λ_sparsity=:OGM, t_sparsity=:off)
-
+function solve_fractional_conic(N, R, κ, q;
+    t_lower=1e-12, λ_lower=1e-12, s_lower=1e-12,
+    show_output=:off, λ_sparsity=:OGM, t_sparsity=:off)
+function solve_fractional_conic(N, R, β, q;
+    t_lower=1e-8, λ_lower=1e-8, s_lower=1e-8,
+    show_output=:off, λ_sparsity=:off, t_sparsity=:off)
     @assert 0 <= q ≤ 1 "q must be in (0,1]."
     I_N_star = -1:N
     I = 0:N
@@ -163,17 +168,66 @@ function standard_basis(i, N)
     e[i] = 1
     return e
 
+function coeff_vs_N(q;
+    N_min::Int=5,
+    N_max::Int=200,
+    step::Int=5,
+    R::Float64=1.0,
+    κ::Float64=1.0)
+    @assert 0 < q ≤ 1 "q must be in (0,1]."
+# ------------- Example run -------------
+N = 2;
+R = 9.2;
+β = 5.3;
+q = 1;
+L(δ) = β / ((δ)^q)
+L_inv(u) = (β / u)^(1 / q)
+
+res = solve_fractional_conic(N, R, β, q; show_output=:off, λ_sparsity=:off, t_sparsity=:off)
+println("------------------------------------------------")
+println(("status" => res.status, "obj" => res.obj, "s" => res.s_opt))
+theoretical_obj = (q + 1)^((q - 1) / (q + 1)) / q^(q / (q + 1)) * β^(1 / (1 + q)) * R^(2 / (1 + q)) / (N + 1)^((2 - q) / (1 + q))
+display(theoretical_obj)
+# println("\n ------- f_i duals -------\n")
+# for i = 0:N-1
+#     println("f_", string(i), " = ", -res.duals_A[i] + res.obj)
+# end
+# println("f_", string(N), " = ", -res.dual_B + res.obj)
+# println("\n ------- g_i duals -------\n")
+# for i = 0:N
+#     println("||g_", string(i), "||^2 = ", -2 * res.duals_C[i][2])
+# end
+
+using OffsetArrays
+
+f = OffsetArray(zeros(N + 1), 0:N)
+for i = 0:N-1
+    f[i] = -res.duals_A[i] + res.obj
 end
 
+f[N] = -res.dual_B + res.obj
 
-function coeff_vs_N(q;
-        N_min::Int = 5,
-        N_max::Int = 200,
-        step::Int = 5,
-        R::Float64 = 1.0,
-        κ::Float64 = 1.0)
-    @assert 0 < q ≤ 1 "q must be in (0,1]."
+G = OffsetArray(zeros(N + 1), 0:N)
+for i = 0:N
+    G[i] = -2 * res.duals_C[i][2]
+end
 
+g = OffsetArray(zeros(N + 1, N + 1), 1:N+1, 0:N)
+for i = 0:N
+    g[:, i] = sqrt(G[i]) * standard_basis(i + 1, N + 1)
+end
+
+s = res.s_opt
+
+λ_opt = Dict{i_j_idx,Float64}(k => 1/s*res.λ_opt[k] for k in axes(res.λ_opt, 1))
+t_opt = Dict{i_j_idx,Float64}(k => 1/s*res.t_opt[k] for k in axes(res.t_opt, 1))
+
+λ_mat = OffsetArray(get_λ_matrices(λ_opt, N, 1e-8), -1:N, -1:N)
+t_mat = OffsetArray(get_λ_matrices(t_opt, N, 1e-8), -1:N, -1:N)
+δ_mat = @. L_inv(λ_mat / t_mat)
+δ_mat[.!isfinite.(δ_mat)] .= 0.0
+display(t_mat)
+display(λ_mat)
 
     display(string("Determining coefficients for q = ", q))
     display("---------------------------------")
@@ -185,8 +239,8 @@ function coeff_vs_N(q;
     L_inv(u) = (κ / u)^(1 / q)
 
     for (k, N) in enumerate(Ns)
-        res = solve_fractional_conic(N, R, κ, q; show_output = :off,
-                                     λ_sparsity = :off, t_sparsity = :off)
+        res = solve_fractional_conic(N, R, κ, q; show_output=:off,
+            λ_sparsity=:off, t_sparsity=:off)
         theoretical_obj = κ^(1 / (1 + q)) * R^(2 / (1 + q)) /
                           (N + 1)^((2 - q) / (1 + q))
         coeffs[k] = res.obj / theoretical_obj
@@ -330,7 +384,177 @@ display(plt)
 
 # ratio_guess = num_guess / den_guess
 # display(ratio_guess)
+=======
+"""
+    coeff_vs_q(N, R, κ; q_min=0.01, q_max=1.0, n_q=50)
 
+For fixed N, R, κ, solve the fractional conic for a range of q from q_min to q_max
+and plot the ratio (PEP objective / theoretical objective) vs q.
+Returns (qs, coeffs, plt).
+"""
+function coeff_vs_q(N::Int, R::Float64, κ::Float64;
+    q_min::Float64=0.01,
+    q_max::Float64=1.0,
+    n_q::Int=50)
+    @assert 0 < q_min < q_max ≤ 1 "q_min and q_max must satisfy 0 < q_min < q_max ≤ 1."
+
+    qs = range(q_min, q_max; length=n_q)
+    coeffs = zeros(Float64, length(qs))
+
+    display(string("Running for N = ", N))
+    display(string("------------------"))
+    for (k, q) in enumerate(qs)
+        res = solve_fractional_conic(N, R, κ, q; show_output=:off,
+            λ_sparsity=:off, t_sparsity=:off)
+        theoretical_obj = κ^(1 / (1 + q)) * R^(2 / (1 + q)) /
+                          (N + 1)^((2 - q) / (1 + q))
+        coeffs[k] = res.obj / theoretical_obj
+        if k % 2 == 0
+            display(string("computing for q = ", q))
+        end
+    end
+
+    plt = plot(collect(qs), coeffs;
+        xlabel="q",
+        ylabel="coeff",
+        title="coefficients vs q (N = $N)",
+        label="constructive approach",
+        linewidth=2.5,
+        legend=:bottomright)
+
+    sparsity = 1
+    theo_coeffs = [(q + 1)^((q - 1) / (q + 1)) / (q^(q / (q + 1))) for (k, q) in enumerate(qs) if k % sparsity == 0]
+    qs_sparse = [q for (k, q) in enumerate(qs) if k % sparsity == 0]
+    plot!(plt, qs_sparse, theo_coeffs; label="theoretical asymptotics", linewidth=2.5)
+    #$\ \left(q+1\right)^{\frac{q-1}{q+1}}q^{\frac{-q}{q+1}}$
+    return collect(qs), coeffs, plt
+end
+
+function obj_vs_N(q;
+    N_min::Int=5,
+    N_max::Int=200,
+    step::Int=5,
+    R::Float64=1.0,
+    κ::Float64=1.0,
+    save_csv::Bool=false,
+    csv_path::AbstractString="obj_vs_N_q$(q).csv")
+
+    @assert 0 < q ≤ 1 "q must be in (0,1]."
+
+    display(string("Computing objective values for q = ", q))
+    display("----------------------------------------")
+
+    Ns = collect(N_min:step:N_max)
+    objs = zeros(Float64, length(Ns))
+
+    for (k, N) in enumerate(Ns)
+        res = solve_fractional_conic(N, R, κ, q;
+            show_output=:off,
+            λ_sparsity=:off,
+            t_sparsity=:off)
+        objs[k] = res.obj
+        if N % 20 == 0
+            display(string("Running for N = ", N, " out of ", N_max))
+        end
+    end
+
+    display("done")
+
+    plt = plot(Ns, objs;
+        xlabel="N",
+        ylabel="obj",
+        title="objective value vs N for q = $(q)",
+        legend=false)
+
+    if save_csv
+        open(csv_path, "w") do io
+            println(io, "N,obj")
+            for (N, obj) in zip(Ns, objs)
+                println(io, "$(N),$(obj)")
+            end
+        end
+    end
+
+    return Ns, objs, plt
+end
+
+
+# Ns, objs, plt = obj_vs_N(1.0,
+#                          N_min = 10,
+#                          N_max = 200,
+#                          step = 5,
+#                          save_csv = true,
+#                          csv_path = "obj_vs_N_q1p0.csv")
+# display(plt)
+
+
+# Build guessed λ matrix with same dimensions as λ_mat
+# Build guessed λ matrix with same axes as λ_mat: (-1:N, -1:N)
+λ_guess = OffsetArray(zeros(N + 2, N + 2), -1:N, -1:N)
+t_guess = OffsetArray(zeros(N + 2, N + 2), -1:N, -1:N)
+δ_guess = OffsetArray(zeros(N + 2, N + 2), -1:N, -1:N)
+# Top row: arcs (-1, j), j = 0..N
+for j in 0:N
+    λ_guess[-1, j] =  R / sqrt(β*(N+1))
+end
+
+# Off-diagonal: arcs (i, i+1), i = 0..N-1
+for i in 0:(N - 1)
+    λ_guess[i, i + 1] =  R * (i+1) / sqrt(β*(N + 1))
+    δ_guess[i, i + 1] = sqrt(β)*R/((N)*sqrt(N+1)*(i+1))
+end
+
+for i in 0:(N-1)
+    for j in i+1:N 
+        t_guess[i,j] = R^2/(β*(N)*(N+1))
+    end
+end
+
+
+# Now this comparison is well-defined (all OffsetArrays with same axes)
+display(maximum(abs.(λ_mat - λ_guess)))
+display(maximum(abs.(t_mat - t_guess)))
+display(maximum(abs.(δ_mat - δ_guess)))
+I_N_star = -1:N  # {-1, 0, ..., N} if not already defined
+
+# Numerator: (1/2)R^2 + ∑_{i,j} λ_{i,j} L^{-1}(λ_{i,j}/t_{i,j})
+num = 0.5 * R^2 +
+      sum(
+          λ_opt[i_j_idx(i, j)] *
+          L_inv(λ_opt[i_j_idx(i, j)] / t_opt[i_j_idx(i, j)])
+          for i in I_N_star, j in I_N_star if i != j
+      )
+
+# Denominator: ∑_{i=0}^N λ_{⋆,i}  with ⋆ ≡ -1
+den = sum(λ_opt[i_j_idx(-1, j)] for j in 0:N)
+
+ratio = num / den
+display(ratio)
+
+num1 = 0.5 * R^2 +
+      sum(
+          λ_mat[i,j] *
+          L_inv(λ_mat[i,j] / t_mat[i,j])
+          for i in I_N_star, j in I_N_star if i != j && abs(t_mat[i,j]) > 0.00001 && λ_mat[i,j] > 0
+      )
+
+# Denominator: ∑_{i=0}^N λ_{⋆,i}  with ⋆ ≡ -1
+den1 = sum(λ_mat[-1,j] for j in 0:N)
+
+ratio1 = num1 / den1
+display(ratio1)
+
+# Same ratio computation, but using the guessed matrices
+num_guess = 0.5 * R^2 +
+    sum(
+       λ_guess[i, j] * δ_guess[i, j]
+        for i in I_N_star, j in I_N_star if i != j && λ_guess[i, j] > 0
+    )
+
+den_guess = sum(λ_guess[-1, j] for j in 0:N)
+
+# ratio_guess = num_guess / den_guess
+# display(ratio_guess)
 
 
 # X = OffsetArray(zeros(N + 1, N + 1), 1:N+1, 0:N)
@@ -425,4 +649,21 @@ display(plt)
 
 # zeta, X_driori = drori_iterates_from_fG(f, G)
 # # display(X_driori)
+# we expect coeff = \frac{\left(q+1\right)^{\frac{q-1}{q+1}}}{q^{\frac{q}{q+1}}}
+# Ns, coeffs, plt = coeff_vs_N(0.5, N_min = 10, N_max = 200, step = 10)
+# display(plt) 
 
+
+qs, coeffs, plt = coeff_vs_q(150, 1.0, 1.0, q_min=1e-8,
+    q_max=1.0,
+    n_q=51)
+display(plt)
+
+
+csv_path = "constructive_coeffs_N_150.csv"
+open(csv_path, "w") do io
+    println(io, "q, coeff")
+    for (q, coeff) in zip(qs, coeffs)
+        println(io, "$(q),$(coeff)")
+    end
+end

@@ -20,7 +20,7 @@ function graph_obj_vs_N(csv_path::String, q::Real; save_path::Union{String,Nothi
     exponent = (2 - q) / (1 + q)
     coeff1 = (q + 1)^((q - 1) / (q + 1)) / (q^(q / (q + 1)))
     curve1 = coeff1 * 1.0 ./ (N .+ 1) .^ exponent
-    coeff2 = 2^(1 + 2 * (1 - q) / (1 + q))
+    coeff2 = 2^(3/(1+q))*q^(-q/(1+q))
     curve2 = coeff2 * 1.0 ./ (N .^ exponent)
 
     q = round(q,digits = 2)
@@ -33,7 +33,8 @@ function graph_obj_vs_N(csv_path::String, q::Real; save_path::Union{String,Nothi
         legend=:topright,
         linewidth=2.5,
         yaxis=:log,
-        title = L"Performance for $L(\delta) = 1/\delta^{%$(q)}$")
+        title = L"Performance for $L(\delta) = 1/\delta^{%$(q)}$",
+        dpi = 600)
 
 
     if q < 1e-6
@@ -46,9 +47,9 @@ end
 
 
 function graph_constructive_coeffs_vs_q(; 
-    path_N50::AbstractString = "constructive_coeffs_N_50.csv",
-    path_N150::AbstractString = "constructive_coeffs_N_150.csv",
-    path_N250::AbstractString = "constructive_coeffs_N_250.csv",
+    path_N50::AbstractString = "Data and Plotting/constructive_coeffs_N_50.csv",
+    path_N150::AbstractString = "Data and Plotting/constructive_coeffs_N_150.csv",
+    path_N250::AbstractString = "Data and Plotting/constructive_coeffs_N_250.csv",
     save_path::Union{String,Nothing} = nothing)
 
 # Load CSVs: header "q, coeff"
@@ -75,7 +76,8 @@ plt = plot(
     linewidth = 2.5,
     color =:dodgerblue,
     legend = :best,
-    title = L"Asymptotic Coefficients for $L(\delta) = 1/{\delta^q}$")
+    title = L"Asymptotic Coefficients for $L(\delta) = 1/{\delta^q}$",
+    dpi = 600)
 
 plot!(plt, q, c150; label = "N = 150", linewidth = 2.5, color =:blue)
 plot!(plt, q, c250; label = "N = 250", linewidth = 2.5,
@@ -104,11 +106,13 @@ function OGM_rates(β, R, N)
     return rate
 end
 
-plt = graph_obj_vs_N("obj_vs_N_q0p25.csv", 0.25, save_path = "obj_q_0p25.png")
-plt = graph_obj_vs_N("obj_vs_N_q0p5.csv", 0.5, save_path = "obj_q_0p5.png")
-plt = graph_obj_vs_N("obj_vs_N_q1e-8.csv", 1e-8, save_path = "obj_q_1e-8.png")
-plt = graph_obj_vs_N("obj_vs_N_q1p0.csv", 1.0, save_path = "obj_q_1p0.png")
-#plt = graph_constructive_coeffs_vs_q()
+# plt = graph_obj_vs_N("Data and Plotting/obj_vs_N_q0p25.csv", 0.25, save_path = "obj_q_0p25.png")
+# plt = graph_obj_vs_N("Data and Plotting/obj_vs_N_q0p5.csv", 0.5, save_path = "obj_q_0p5.png")
+# plt = graph_obj_vs_N("Data and Plotting/obj_vs_N_q1e-8.csv", 1e-8, save_path = "obj_q_1e-8.png")
+# plt = graph_obj_vs_N("Data and Plotting/obj_vs_N_q1p0.csv", 1.0, save_path = "obj_q_1p0.png")
+
+# plt = graph_constructive_coeffs_vs_q(save_path = "coeff_vs_q_highres.png")
 
 
 
+plt = graph_obj_vs_N("Data and Plotting/obj_vs_N_q0p25.csv", 0.25)
