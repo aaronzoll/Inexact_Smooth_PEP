@@ -4,6 +4,7 @@ using MosekTools # or Ipopt, etc.
 import MathOptInterface as MOI
 using Ipopt
 using Revise
+using OffsetArrays
 
 """
     solve_fractional_model(N, R, beta)
@@ -22,7 +23,7 @@ Subject to:
 function solve_fractional_model(N::Int, R::Float64, beta::Float64)
     Js = -1:N
     model = Model(Ipopt.Optimizer)
-    set_silent(model) 
+    set_silent(model)
     TOL = 1e-8
     # Domain: to keep λ_{i,j}/t_{i,j} > 0, we enforce nonnegativity.
     @variable(model, λ[i in Js, j in Js] >= 0)
@@ -34,7 +35,7 @@ function solve_fractional_model(N::Int, R::Float64, beta::Float64)
 
 
 
-    for i in -1:N, j in -1:(i)
+    for i in -1:N, j in -1:(i-1)
         @constraint(model, λ[i, j] == TOL)
         @constraint(model, t[i, j] == TOL)
     end
@@ -50,11 +51,11 @@ function solve_fractional_model(N::Int, R::Float64, beta::Float64)
     # Constraints:
     # 1) For j = 0,...,N-1:
     #    ∑_{i=0}^{j-1} -λ_{i,j} + ∑_{i=j+1}^N λ_{j,i} = λ[-1,j]
-    for j in 0:(N - 1)
+    for j in 0:(N-1)
         @constraint(
             model,
-            sum(-λ[i, j] for i in 0:(j - 1)) +
-            sum( λ[j, i] for i in (j + 1):N) ==
+            sum(-λ[i, j] for i in 0:(j-1)) +
+            sum(λ[j, i] for i in (j+1):N) ==
             λ[-1, j]
         )
     end
@@ -63,8 +64,8 @@ function solve_fractional_model(N::Int, R::Float64, beta::Float64)
     #    -∑_{i=0}^{N-1} λ_{i,N} = -∑_{i=0}^{N-1} λ[-1,i]
     @constraint(
         model,
-        sum(-λ[i, N] for i in 0:(N - 1)) ==
-        -sum(λ[-1, i] for i in 0:(N - 1))
+        sum(-λ[i, N] for i in 0:(N-1)) ==
+        -sum(λ[-1, i] for i in 0:(N-1))
     )
 
     # 3) For j = 0,...,N:
@@ -72,11 +73,12 @@ function solve_fractional_model(N::Int, R::Float64, beta::Float64)
     for j in 0:N
         @NLconstraint(
             model,
-            sum(-t[i, j] for i in 0:(j - 1)) +
-            sum(-t[j, i] for i in (j + 1):N) -
+            sum(-t[i, j] for i in 0:(j-1)) +
+            sum(-t[j, i] for i in (j+1):N) -
             t[-1, j] +
             λ[-1, j]^2
-            <= 0.0
+            <=
+            0.0
         )
     end
 
@@ -105,7 +107,7 @@ function solve_fractional_model_mosek(N::Int, R::Float64, beta::Float64; TOL::Fl
     # IMPORTANT: MOSEK disallows the SAME variable from appearing in multiple cones.
     # So we create one copy s_half[j] per cone, and tie it to s with linear equalities.
     @variable(model, s_half[j in 0:N] >= 1e-12)
-    @constraint(model, [j in 0:N], s_half[j] == 0.5*s)
+    @constraint(model, [j in 0:N], s_half[j] == 0.5 * s)
 
     # Normalization: sum λ̃[-1,j] = 1
     @constraint(model, sum(λs[-1, j] for j in 0:N) == 1.0)
@@ -119,20 +121,24 @@ function solve_fractional_model_mosek(N::Int, R::Float64, beta::Float64; TOL::Fl
         @constraint(model, ts[i, j] == TOL * s)
     end
 
+    for j in 0:N
+        #  @constraint(model, ts[-1,j] >= 2*R^2/(beta^2 * N *(N+1)))
+    end
+
     # Linear constraints with λ̃
-    for j in 0:(N - 1)
+    for j in 0:(N-1)
         @constraint(
             model,
-            sum(-λs[i, j] for i in 0:(j - 1)) +
-            sum( λs[j, i] for i in (j + 1):N) ==
+            sum(-λs[i, j] for i in 0:(j-1)) +
+            sum(λs[j, i] for i in (j+1):N) ==
             λs[-1, j]
         )
     end
 
     @constraint(
         model,
-        sum(-λs[i, N] for i in 0:(N - 1)) ==
-        -sum(λs[-1, i] for i in 0:(N - 1))
+        sum(-λs[i, N] for i in 0:(N-1)) ==
+        -sum(λs[-1, i] for i in 0:(N-1))
     )
 
     # Conic + linear constraints for each j
@@ -140,8 +146,8 @@ function solve_fractional_model_mosek(N::Int, R::Float64, beta::Float64; TOL::Fl
         # -Σ t̃[...] - t̃[-1,j] + q[j] <= 0
         @constraint(
             model,
-            sum(-ts[i, j] for i in 0:(j - 1)) +
-            sum(-ts[j, i] for i in (j + 1):N) -
+            sum(-ts[i, j] for i in 0:(j-1)) +
+            sum(-ts[j, i] for i in (j+1):N) -
             ts[-1, j] +
             q[j] <= 0.0
         )
@@ -179,11 +185,11 @@ function build_FSFOM_matrices(N, λ_matrix, t_matrix)
     # ---------------------------------------------------------------
 
     # --- Absolute formulation: x_k = x0 - Σ H_abs[k,i] g_i ----------
-    H_abs = OffsetArray(zeros(N+1, N+1), 0:N, 0:N)
+    H_abs = OffsetArray(zeros(N + 1, N + 1), 0:N, 0:N)
 
     # z[:,j] = x0 - Σ_{i=0}^{j-1} λ[-1,i] * g[:,i]
     # So z has its own "H" coefficients:
-    z_H = OffsetArray(zeros(N+1, N+1), 0:N, 0:N)  # z_H[j,i] = coeff of g_i in z[:,j]
+    z_H = OffsetArray(zeros(N + 1, N + 1), 0:N, 0:N)  # z_H[j,i] = coeff of g_i in z[:,j]
     for j = 1:N
         for i = 0:j-1
             z_H[j, i] = λ_matrix[-1, i]
@@ -220,7 +226,7 @@ function build_FSFOM_matrices(N, λ_matrix, t_matrix)
 
     # --- Incremental formulation: x_k = x_{k-1} - Σ H_inc[k,i] g_i --
     # H_inc[k,i] = H_abs[k,i] - H_abs[k-1,i]
-    H_inc = OffsetArray(zeros(N+1, N+1), 0:N, 0:N)
+    H_inc = OffsetArray(zeros(N + 1, N + 1), 0:N, 0:N)
     for k = 1:N
         for i = 0:N
             H_inc[k, i] = H_abs[k, i] - H_abs[k-1, i]
@@ -233,10 +239,10 @@ end
 
 function run_fom1(x0::AbstractVector, g::AbstractMatrix, H, N::Int)
     d = length(x0)
-    X = OffsetArray(zeros(eltype(x0), d, N+1), 1:d, 0:N)
+    X = OffsetArray(zeros(eltype(x0), d, N + 1), 1:d, 0:N)
     X[:, 0] .= x0
     for j in 1:N
-        X[:, j] .=  x0
+        X[:, j] .= x0
         for i in 0:j-1
             X[:, j] .-= H[j, i] .* g[:, i]
         end
@@ -246,7 +252,7 @@ end
 
 function run_fom2(x0::AbstractVector, g::AbstractMatrix, H, N::Int)
     d = length(x0)
-    X = OffsetArray(zeros(eltype(x0), d, N+1), 1:d, 0:N)
+    X = OffsetArray(zeros(eltype(x0), d, N + 1), 1:d, 0:N)
     X[:, 0] .= x0
     for j in 1:N
         X[:, j] .= X[:, j-1]
@@ -257,73 +263,121 @@ function run_fom2(x0::AbstractVector, g::AbstractMatrix, H, N::Int)
     return X
 end
 
-N = 17
+function check_foms(t_guess, λ_guess)
+    H_abs, H_inc = build_FSFOM_matrices(N, λ_guess, t_guess)
 
+    #H_inc = absolute_to_incremental(H, N)
+    d = N + 1
+    G = OffsetArray(Diagonal(ones(N + 1)), 1:d, 0:N)
+    x0 = zeros(d)
+    X1 = run_fom1(x0, G, H_abs, N)
+    X2 = run_fom2(x0, G, H_inc, N)
+
+
+    X3 = OffsetArray(zeros(d, N + 1), 1:d, 0:N)
+    X3[:, 0] .= x0
+    z = OffsetArray(zeros(d, N + 1), 1:d, 0:N)
+    z[:, 1] = X3[:, 0] - λ_guess[-1, 0] * G[:, 0]
+
+    for j = 1:N
+        num = sum(λ_guess[i, j] .* X3[:, i] .- t_guess[i, j] .* G[:, i] for i = 0:j-1) + λ_guess[-1, j] .* z[:, j]
+        denom = sum(λ_guess[i, j] for i = 0:j-1) + λ_guess[-1, j]
+
+        X3[:, j] = num / denom
+        if j < N
+            z[:, j+1] = z[:, j] .- λ_guess[-1, j] .* G[:, j]
+        end
+    end
+
+    X4 = OffsetArray(zeros(d, N + 1), 1:d, 0:N)
+    y = OffsetArray(zeros(d, N + 1), 1:d, 0:N)
+    X4[:, 0] .= x0
+    d_vec = zeros(d)  # d_k = sum_{i=0}^{k-1} g_i
+
+    for k = 1:N
+        d_vec .+= G[:, k-1]  # accumulate g_{k-1}
+        X4[:, k] = (k .* X4[:, k-1] .+ x0) ./ (k + 1) .- (sqrt(2) * R * sqrt(N + 1)) / (β * N * (k + 1)) .* d_vec
+    end
+
+    return X1, X2, X3, X4
+
+
+end
+
+function test_constraints(λ_mat, t_mat, N)
+
+    const_1 = zeros(N)
+    const_2 = 0
+    const_3 = zeros(N+1)
+
+    for j = 0:N-1
+        const_1[j+1] = sum([-λ_mat[i, j] for i = 0:j-1]) + sum([λ_mat[j, i] for i = j+1:N]) - λ_mat[-1, j]
+    end
+
+    const_2 = -sum([λ_mat[-1,i] for i = 0:N-1])+sum([λ_mat[i,N] for i = 0:N-1])
+
+    for j = 0:N
+        const_3[j+1] = sum([-t_mat[i, j] for i = 0:j-1]) + sum([-t_mat[j, i] for i = j+1:N]) - t_mat[-1, j] + λ_mat[-1,j]^2
+    end
+
+    return const_1, const_2, const_3
+end
+
+function count_nonzeros(mat, TOL)
+
+    cnt = 0
+    for i = mat 
+        if i > TOL
+            cnt += 1
+        end
+    end
+
+    return cnt
+
+end
+
+N = 8
 R = 1.0
 β = 1.0
 
 
-
-
 val, λ_opt, t_opt, s_val, q_val = solve_fractional_model_mosek(N, R, β)
 display(val)
-display(β*R/(sqrt(2*(N+1))))
+display(β * R / (sqrt(2 * (N + 1))))
 
 
-Js = axes(t_opt, 1)                 # e.g. -1:8
+Js = axes(t_opt, 1)       
 t_guess = JuMP.Containers.DenseAxisArray(zeros(length(Js), length(Js)), Js, Js)
 λ_guess = JuMP.Containers.DenseAxisArray(zeros(length(Js), length(Js)), Js, Js)
 
 
 for j in 0:N
-    λ_guess[-1, j] =  sqrt(2)*R / (β*sqrt((N+1)))
+    λ_guess[-1, j] = sqrt(2) * R / (β * sqrt((N + 1)))
 end
 
 # Off-diagonal: arcs (i, i+1), i = 0..N-1
-for i in 0:(N - 1)
-    λ_guess[i, i + 1] = sqrt(2)* R * (i+1) / (β*sqrt((N + 1)))
+for i in 0:(N-1)
+    λ_guess[i, i+1] = sqrt(2) * R * (i + 1) / (β * sqrt((N + 1)))
 end
 
 for i in 0:(N-1)
-    for j in i+1:N 
-        t_guess[i,j] = 2*R^2/(β^2*(N)*(N+1))
+    for j in i+1:N
+        t_guess[i, j] = 2 * R^2 / (β^2 * (N) * (N + 1))
     end
 end
 
-
-display((0.5*R^2 + 0.5*β^2*sum(t_guess))/sum(λ_guess[-1,j] for j in 0:N))
-
-
-
-
-
-
-
-H_abs, H_inc = build_FSFOM_matrices(N, λ_guess, t_guess)
-
-#H_inc = absolute_to_incremental(H, N)
-d = N+1
-G = OffsetArray(Diagonal(ones(N+1)), 1:d, 0:N)
-x0 = zeros(d)
-X1 = run_fom1(x0, G, H_abs, N)
-X2 = run_fom2(x0, G, H_inc, N)
-
-
-X3 = OffsetArray(zeros(d, N + 1), 1:d, 0:N)
-X3[:, 0] .= x0
-z = OffsetArray(zeros(d, N + 1), 1:d, 0:N)
-z[:, 1] = X3[:, 0] - λ_guess[-1, 0] * G[:, 0]
-
-for j = 1:N
-    num =  sum(λ_guess[i,j] .* X3[:,i] .- t_guess[i,j] .* G[:,i] for i = 0:j-1) + λ_guess[-1,j] .* z[:,j]
-    denom = sum(λ_guess[i, j] for i = 0:j-1) + λ_guess[-1, j]
-
-    X3[:, j] = num / denom             
-    if j < N
-        z[:, j+1] = z[:, j] .- λ_guess[-1, j] .* G[:, j] 
-    end
+for j in 0:N
+    t_guess[-1, j] =  2 * R^2 / (β^2 * (N) * (N + 1))
 end
 
-display(N*H_inc)
 
-λ_guess
+display((0.5 * R^2 + 0.5 * β^2 * sum(t_guess)) / sum(λ_guess[-1, j] for j in 0:N))
+
+
+
+X1, X2, X3, X4 = check_foms(t_guess, λ_guess)
+
+const_1, const_2, const_3 = test_constraints(λ_guess, t_guess, N)
+
+
+
