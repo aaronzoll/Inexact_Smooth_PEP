@@ -616,7 +616,7 @@ function solve_primal_with_known_stepsizes_batch(N, L, α, R, ε_set, p, μ, spa
         set_silent(model_primal_PEP_with_known_stepsizes)
     end
 
-    optimize!(model_primal_PEP_with_known_stepsizes)
+    JuMP.optimize!(model_primal_PEP_with_known_stepsizes)
 
     # store and return the solution
     # -----------------------------
@@ -640,7 +640,11 @@ function solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;
     show_output          = :off,
     ϵ_tol_feas           = 1e-6,
     objective_type       = :default,
-    obj_val_upper_bound  = default_obj_val_upper_bound)
+    obj_val_upper_bound  = default_obj_val_upper_bound,
+    acceptable_termination_statuses = [MOI.OPTIMAL, MOI.SLOW_PROGRESS]  # ← add this
+    )
+
+    # ... all existing code unchanged ...
 
     M = size(ε_set, 3)          # last axis is m ∈ 1:M
 
@@ -687,11 +691,16 @@ function solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;
     end
 
     show_output == :off && set_silent(model)
+
     JuMP.optimize!(model)
 
-    if termination_status(model) != MOI.OPTIMAL
+    # replace the old status check with:
+    if termination_status(model) ∉ acceptable_termination_statuses
         @error "solve_dual_PEP: not optimal — status = " termination_status(model)
+        return Inf, nothing, nothing   # ← return Inf cleanly instead of erroring
     end
+
+
 
     λ_opt   = value.(λ)
     ν_opt   = value.(ν)
