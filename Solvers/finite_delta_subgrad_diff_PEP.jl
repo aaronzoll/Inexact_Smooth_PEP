@@ -77,16 +77,16 @@ end
 #  α-matrix constructors  (unchanged from before)
 # ─────────────────────────────────────────────────────────────────────────────
 
-function make_α_gradient_descent(N, h)
+function make_α_gradient_descent(N, β, R)
     α = OffsetArray(zeros(N, N), 1:N, 0:N-1)
     for i in 1:N, j in 0:i-1
-        α[i, j] = h
+        α[i, j] = h/β
     end
     return α
 end
 
 
-function make_α_nesterov(N, L)
+function make_α_nesterov(N, L, R)
     α = OffsetArray(zeros(N, N), 1:N, 0:N-1)
 
     t = ones(N + 2)
@@ -115,10 +115,10 @@ function make_α_nesterov(N, L)
 end
 
 
-function make_α_ogm(N, L)
+function make_α_ogm(N, L, R)
     θ = compute_theta(N)
     H = OffsetArray(compute_H(N), 1:N, 0:N-1)
-    return compute_α_from_h(H, N, 0.0, L)
+    return compute_α_from_h(H, N)
 end
 
 
@@ -238,6 +238,18 @@ function make_α_subgradient_avg(N, β, R)
 
     return compute_α_from_h(H, N)
 end
+
+function make_α_BSOGM(N, β, R)
+    η = sqrt(2) * R * sqrt(N + 1) / (β * N)
+    α = OffsetArray(zeros(N, N), 1:N, 0:N-1)
+    for k in 1:N          # row  (iterate index)
+        for i in 0:k-1    # col  (gradient index, 1-based: i+1)
+            α[k, i] = η * (k - i) / (k + 1)
+        end
+    end
+    return α
+end
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  δ_set helpers
@@ -577,7 +589,7 @@ function optimize_δ_for_fixed_α_simple(
                 ϵ_tol_feas=ϵ_tol_feas,
                 objective_type=objective_type,
                 obj_val_upper_bound=obj_val_upper_bound,
-                acceptable_termination_statuses=[MOI.OPTIMAL, MOI.SLOW_PROGRESS]
+                acceptable_termination_statuses=[MOI.OPTIMAL]
             )
             model_val
         catch err
@@ -680,30 +692,34 @@ function run_obj_vs_N_sweep_optimal(
 
     obj_opts = Float64[]
     true_BSD = Float64[]
-    lip_rate_true = Float64[]
+    minimax_rate_true = Float64[]
     L = β * Lip_scaling
     for N in N_vals
         display("running N = " * string(N))
         α = make_α(N, L, R)
 
-        obj_opt, _ = optimize_δ_for_fixed_α_simple(
-            N, β, α, R, p, zero_idx;
-            show_trace=show_trace,
-            obj_val_upper_bound=obj_val_upper_bound,
-            optimize_kwargs...,
-        )
+        if N < 1
+            obj_opt, _ = optimize_δ_for_fixed_α_simple(
+                N, β, α, R, p, zero_idx;
+                show_trace=show_trace,
+                obj_val_upper_bound=obj_val_upper_bound,
+                optimize_kwargs...,
+            )
+        else
+            obj_opt = 0.0
+        end
 
         obj_opt_true_BS, _, _ = solve_primal_with_known_stepsizes_bounded_subgrad(N, β, α, R; show_output=:off)
 
         push!(obj_opts, obj_opt)
         push!(true_BSD, obj_opt_true_BS)
-        push!(lip_rate_true, L * R / sqrt(N + 1))
+        push!(minimax_rate_true, L * R / sqrt(2*(N + 1)))
     end
 
-    df = DataFrame(N=N_vals, delta_opt=obj_opts, bounded_subgrad=true_BSD, lip_rate=lip_rate_true)
+    df = DataFrame(N=N_vals, delta_opt=obj_opts, bounded_subgrad=true_BSD, minimax_rate=minimax_rate_true)
     CSV.write(csv_path, df)
 
-    return N_vals, obj_opts, true_BSD, lip_rate_true
+    return N_vals, obj_opts, true_BSD, minimax_rate_true
 end
 
 
@@ -719,9 +735,9 @@ p = 0.0 # DO NOT CHANGE
 N = 11
 Lip_scaling = 1.0
 
-
-
-N_vals, obj_opts, true_BSD, lip_rate_true = run_obj_vs_N_sweep_optimal(R, β, p, Lip_scaling, make_α_ssep; csv_path="ssep_results_scaling_" * string(Lip_scaling) * ".csv")
+α_type = make_α_optimal_SG_step
+csv_path = string(α_type)* "_results_scaling_" * string(Lip_scaling) * ".csv"
+N_vals, obj_opts, true_BSD, minimax_rate_true = run_obj_vs_N_sweep_optimal(R, β, p, Lip_scaling, α_type; csv_path)
 
 
 # α = make_α_ssep(N, β, R)

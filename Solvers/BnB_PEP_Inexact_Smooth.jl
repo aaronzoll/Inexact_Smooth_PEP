@@ -254,84 +254,71 @@ a_vec(i, j, 𝐟) = 𝐟[:, j] - 𝐟[:, i]
 # step_size options, scaled sets algorithm to use L_epsilon
 # otherwise, stepsizes are 1/L
 
-function solve_primal_with_known_stepsizes(N, L, h, R, ε, p; show_output=:off, step_size=:scaled)
-    # data generator
-    # --------------
-    L_eps = ((1 - p) / (1 + p) * 1 / ε)^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
-    if step_size == :scaled
-        𝐱, 𝐠, 𝐟 = data_generator_function(N, L_eps, h; input_type=:stepsize_constant)
-    else
-        𝐱, 𝐠, 𝐟 = data_generator_function(N, L, h; input_type=:stepsize_constant)
-    end
-    # number of points etc
-    # --------------------
-
+function solve_primal_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;
+    show_output = :off,
+    ϵ_tol_feas  = 1e-6,
+    objective_type = :default,
+    obj_val_upper_bound = 1e6,
+    acceptable_termination_statuses = [MOI.OPTIMAL, MOI.SLOW_PROGRESS]
+)
+    M = size(ε_set, 3)
     I_N_star = -1:N
-    dim_G = N + 2
+    dim_G  = N + 2
     dim_Ft = N + 1
 
+    𝐱, 𝐠, 𝐟 = data_generator_function(N, L, α; input_type = :stepsize_constant)
+
+    idx_set_λ = index_set_constructor_for_dual_vars_full(I_N_star, M)
+
+    # remove zero'd-out pairs (same as dual fixes λ == 0)
+    zero_set = Set([i_j_m_idx(z...) for z in zero_idx])
+    active_idx = filter(t -> t ∉ zero_set, idx_set_λ)
+
+    function L_ε(ε, p)
+        return ((1 - p) / (1 + p) * 1 / ε)^((1 - p) / (1 + p)) * (L)^(2 / (1 + p))
+    end
 
     # define the model
-    # ----------------
+    model = Model(optimizer_with_attributes(Mosek.Optimizer))
 
-    model_primal_PEP_with_known_stepsizes = Model(optimizer_with_attributes(Mosek.Optimizer))
+    @variable(model, G[1:dim_G, 1:dim_G], PSD)
+    @variable(model, Ft[1:dim_Ft])
 
-    # add the variables
-    # -----------------
+    # objective: maximize f_* - f_N  (same as dual minimizes)
+    @objective(model, Max, Ft' * a_vec(-1, N, 𝐟))
 
-    # construct G ⪰ 0
-    @variable(model_primal_PEP_with_known_stepsizes, G[1:dim_G, 1:dim_G], PSD)
+    # interpolation constraints — one per active (i,j,m) triple
+    for t in active_idx
+        i = t.i
+        j = t.j
+        ε = ε_set[i, j, t.m]
+        L_eps = (p < 1) ? L_ε(ε, p) : L
 
-    # construct Ft (this is just transpose of F)
-    @variable(model_primal_PEP_with_known_stepsizes, Ft[1:dim_Ft])
-
-    # define objective
-    # ----------------
-
-    @objective(model_primal_PEP_with_known_stepsizes, Max,
-        Ft' * a_vec(-1, N, 𝐟)
-    )
-
-    # interpolation constraint
-    # ------------------------
-
-    for i in I_N_star, j in I_N_star
-        if i != j
-            @constraint(model_primal_PEP_with_known_stepsizes, Ft' * a_vec(i, j, 𝐟) + tr(G * A_mat(i, j, h, 𝐠, 𝐱)) + ((1 / (2 * (L_eps))) * tr(G * C_mat(i, j, 𝐠))) - ε <= 0
-            )
-        end
+        @constraint(model,
+            Ft' * a_vec(i, j, 𝐟) +
+            tr(G * A_mat(i, j, α, 𝐠, 𝐱)) +
+            (1 / (2 * L_eps)) * tr(G * C_mat(i, j, 𝐠)) -
+            ε / 2 <= 0
+        )
     end
-
 
     # initial condition
-    # -----------------
+    @constraint(model, tr(G * B_mat(0, -1, α, 𝐱)) <= R^2)
 
-    @constraint(model_primal_PEP_with_known_stepsizes, tr(G * B_mat(0, -1, h, 𝐱)) <= R^2)
+    # solve
+    show_output == :off && set_silent(model)
+    JuMP.optimize!(model)
 
-    # time to optimize
-    # ----------------
-
-    if show_output == :off
-        set_silent(model_primal_PEP_with_known_stepsizes)
+    if termination_status(model) ∉ acceptable_termination_statuses
+        @error "solve_primal_PEP: not optimal — status = " termination_status(model)
+        return Inf, nothing, nothing
     end
 
-    optimize!(model_primal_PEP_with_known_stepsizes)
-
-    # store and return the solution
-    # -----------------------------
-
-    if termination_status(model_primal_PEP_with_known_stepsizes) != MOI.OPTIMAL
-        # @warn "model_primal_PEP_with_known_stepsizes solving did not reach optimality;  termination status = " termination_status(model_primal_PEP_with_known_stepsizes)
-    end
-
-    p_star = objective_value(model_primal_PEP_with_known_stepsizes)
-
-    G_star = value.(G)
-
+    p_star  = objective_value(model)
+    G_star  = value.(G)
     Ft_star = value.(Ft)
 
     return p_star, G_star, Ft_star
-
 end
 
 function solve_primal_with_known_stepsizes_bounded_subgrad(N, β, h, R; show_output=:off)
@@ -696,7 +683,7 @@ function solve_dual_PEP_with_known_stepsizes(N, L, α, R, ε_set, p, zero_idx;
 
     # replace the old status check with:
     if termination_status(model) ∉ acceptable_termination_statuses
-        @error "solve_dual_PEP: not optimal — status = " termination_status(model)
+       # @error "solve_dual_PEP: not optimal — status = " termination_status(model)
         return Inf, nothing, nothing   # ← return Inf cleanly instead of erroring
     end
 
