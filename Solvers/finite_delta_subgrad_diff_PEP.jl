@@ -4,6 +4,7 @@ using OffsetArrays
 using LinearAlgebra, Random, Printf
 using DelimitedFiles, Plots, LaTeXStrings
 using DataFrames, CSV
+using NLopt
 
 # Used by `optimize_δ_for_fixed_α` (keyword default) and sweeps below.
 
@@ -80,7 +81,7 @@ end
 function make_α_gradient_descent(N, β, R)
     α = OffsetArray(zeros(N, N), 1:N, 0:N-1)
     for i in 1:N, j in 0:i-1
-        α[i, j] = h/β
+        α[i, j] = 1/β
     end
     return α
 end
@@ -154,7 +155,7 @@ function verify_nesterov(N, L; d=3, seed=42)
     end
     nes_output = grad_step[N]
 
-    α = make_α_nesterov(N, L)
+    α = make_α_nesterov(N, L, 1)
 
     fsfom_query = [zeros(d) for _ in 0:N]
     fsfom_query[1] = x0
@@ -303,151 +304,8 @@ end
 #  δ-only outer optimizer  (α fixed)
 # ─────────────────────────────────────────────────────────────────────────────
 
-using NLopt
 
-# function optimize_δ_for_fixed_α(
-#     N, L, α, R, p, zero_idx;
-#     δ_init          = nothing,
-#     δ_lb            = 1e-8,
-#     δ_ub            = 1e4,
-#     max_sdp_calls   = 4000,
-#     ftol_rel        = 1e-6,
-#     ftol_abs        = 1e-8,
-#     xtol_rel        = 1e-6,
-#     show_trace      = true,
-#     trace_interval  = 20,
-#     algorithm       = :LN_BOBYQA,   # or :LN_SBPLX, :LN_COBYLA, :LN_NELDERMEAD
-#     show_output          = :off,
-#     ϵ_tol_feas           = 1e-8,
-#     objective_type       = :default,
-#     obj_val_upper_bound  = 1e6,
-# )
-#     M         = 1
-#     I_N_star  = -1:N
-#     idx_set_λ = index_set_constructor_for_dual_vars_full(I_N_star, M)
 
-#     # ── active (i,j) pairs ────────────────────────────────────────────────────
-#     function is_active(i, j)
-#         is_consecutive = (j == i + 1) && (i in -1:N-1)
-#         is_star_to_all = (i == -1)    && (j in 0:N)
-#         return is_consecutive || is_star_to_all
-#     end
-
-#     idx_set_λ_lower          = filter(t -> t.i > t.j, idx_set_λ)
-#     idx_set_λ_active         = filter(t -> t.i < t.j && is_active(t.i, t.j), idx_set_λ)
-#     idx_set_λ_inactive_upper = filter(t -> t.i < t.j && !is_active(t.i, t.j), idx_set_λ)
-#     n_vars = length(idx_set_λ_active)
-
-#     # ── augmented zero_idx ────────────────────────────────────────────────────
-#     lower_tri_zero      = [(t.i, t.j, t.m) for t in idx_set_λ_lower]
-#     inactive_upper_zero = [(t.i, t.j, t.m) for t in idx_set_λ_inactive_upper]
-#     if p == 1.0
-#         zero_idx_aug        = vcat(zero_idx, lower_tri_zero, inactive_upper_zero)
-#     else 
-#         zero_idx_aug        = vcat(zero_idx)
-#     end
-#     @info "Algorithm: $algorithm  |  Active δ variables: $n_vars"
-#     @info "  consecutive (i,i+1) : $(count(t -> t.j == t.i+1, idx_set_λ_active))"
-#     @info "  star-to-all (-1,i)  : $(count(t -> t.i == -1,    idx_set_λ_active))"
-#     @info "  δ ∈ [$δ_lb, $δ_ub]"
-
-#     # ── δ_set builder ─────────────────────────────────────────────────────────
-#     function make_δ_set_from_δ_vec(δ_vec)
-#         δ_set = make_δ_set(N, M, δ_lb)
-#         for (k, t) in enumerate(idx_set_λ_active)
-#             δ_set[t.i, t.j, t.m] = δ_vec[k]
-#         end
-#         return δ_set
-#     end
-
-#     # ── tracking ──────────────────────────────────────────────────────────────
-#     call_count = Ref(0)
-#     best_val   = Ref(Inf)
-#     best_δ_vec = δ_init === nothing ? ones(n_vars) :
-#                  clamp.([δ_init[t.i, t.j, t.m] for t in idx_set_λ_active], δ_lb, δ_ub)
-
-#     # ── NLopt objective (must match signature (x, grad) -> f) ─────────────────
-#     function nlopt_objective(δ_vec::Vector, grad::Vector)
-#         # grad is always empty for derivative-free methods — NLopt still passes it
-#         @assert isempty(grad) "Gradient unexpectedly requested — use a derivative-free algorithm"
-
-#         call_count[] += 1
-#         δ_set = make_δ_set_from_δ_vec(δ_vec)
-
-#         val = try
-#             v, _, _ = solve_dual_PEP_with_known_stepsizes(
-#                 N, L, α, R, δ_set, p, zero_idx_aug;
-#                 show_output         = :off,
-#                 ϵ_tol_feas          = ϵ_tol_feas,
-#                 objective_type      = objective_type,
-#                 obj_val_upper_bound = obj_val_upper_bound
-#             )
-#             v
-#         catch err
-#             @warn "Inner SDP failed at call $(call_count[])" err
-#             return Inf   # NLopt treats Inf as a failed evaluation and steps away
-#         end
-
-#         if val < best_val[]
-#             best_val[]   = val
-#             best_δ_vec  .= δ_vec
-#         end
-
-#         if show_trace && mod(call_count[], trace_interval) == 0
-#             @info "  [call $(call_count[])]" *
-#                   "  obj = $(round(val; sigdigits=6))" *
-#                   "  best = $(round(best_val[]; sigdigits=6))" *
-#                   "  δ ∈ [$(round(minimum(δ_vec); sigdigits=3))," *
-#                   " $(round(maximum(δ_vec); sigdigits=3))]"
-#         end
-
-#         return val
-#     end
-
-#     # ── build NLopt optimizer ─────────────────────────────────────────────────
-#     opt = NLopt.Opt(algorithm, n_vars)
-
-#     opt.lower_bounds  = fill(δ_lb, n_vars)
-#     opt.upper_bounds  = fill(δ_ub, n_vars)
-#     opt.maxeval       = max_sdp_calls
-#     opt.ftol_rel      = ftol_rel
-#     opt.ftol_abs      = ftol_abs
-#     opt.xtol_rel      = xtol_rel
-#     opt.min_objective = nlopt_objective
-
-#     # ── initial point ─────────────────────────────────────────────────────────
-#     u0 = δ_init === nothing ? ones(n_vars) :
-#          clamp.([δ_init[t.i, t.j, t.m] for t in idx_set_λ_active], δ_lb, δ_ub)
-
-#     @info "Initial objective: $(best_val[])"
-
-#     # ── optimize ──────────────────────────────────────────────────────────────
-#     (obj_opt, δ_opt_vec, ret) = NLopt.optimize(opt, u0)
-
-#     # use best seen rather than final iterate in case NLopt ends on a bad step
-#     if best_val[] < obj_opt
-#         δ_opt_vec = copy(best_δ_vec)
-#         obj_opt   = best_val[]
-#     end
-
-#     δ_set_opt    = make_δ_set_from_δ_vec(δ_opt_vec)
-#     active_δ_opt = [(idx_set_λ_active[k].i, idx_set_λ_active[k].j,
-#                      round(δ_opt_vec[k]; sigdigits=5))
-#                     for k in 1:n_vars]
-
-#     @info """
-#     ✅  δ optimisation complete
-#         Algorithm      : $algorithm
-#         Return code    : $ret
-#         Active pairs   : $n_vars
-#         SDP calls      : $(call_count[])
-#         δ bounds       : [$δ_lb, $δ_ub]
-#         Objective      : $obj_opt
-#     """
-#     @info "Optimal δ (i, j, δ):" active_δ_opt
-
-#     return obj_opt, δ_set_opt, zero_idx_aug
-# end
 
 
 function s_recurrence(a, N)
@@ -463,82 +321,6 @@ end
 
 
 
-# function run_obj_vs_N_sweep(
-#     L::Real,
-#     μ::Real,
-#     R::Real,
-#     p::Real;
-#     Lip_scaling = 1.0,
-#     data_path::String = "",
-#     plot_path::String = "",
-#     N_start::Int = 2,
-#     N_stop::Int = 10,
-#     N_step::Int = 1,
-#     zero_idx = [],
-#     show_trace::Bool = false,
-#     obj_val_upper_bound::Real = 1e6,
-#     optimize_kwargs...,
-# )
-#     N_vals = collect(N_start:N_step:N_stop)
-#     isempty(N_vals) && error("Empty N range: N_start=$N_start, N_stop=$N_stop, N_step=$N_step")
-
-#     obj_opts = Float64[]
-#     true_BSD = Float64[]
-#     theory_SGM = Float64[]
-#     true_Lip = Float64[]
-#     for N in N_vals
-#         display("running N = " * string(N))
-#         s_rec = s_recurrence(1, N)
-#         s_last = s_rec[N+1]
-#         h_star = 1/(s_last*sqrt(s_last^2 - 2*N))
-
-#         h = h_star
-#         α = make_α_gradient_descent(N, R/(Lip_scaling*L)* h)
-
-#         obj_opt, _, _ = optimize_δ_for_fixed_α(
-#             N, L, α, R, p, zero_idx;
-#             show_trace = show_trace,
-#             obj_val_upper_bound = obj_val_upper_bound,
-#             optimize_kwargs...,
-#         )
-#         obj_opt_true_BS, _, _ = solve_primal_with_known_stepsizes_bounded_subgrad(N, L, α, R; show_output=:off)
-#         obj_opt_true_Lip, _, _ = solve_primal_with_known_stepsizes_Lipschitz(N, Lip_scaling*L, α, R; show_output=:off)
-
-#         push!(true_BSD, obj_opt_true_BS)
-#         push!(true_Lip, obj_opt_true_Lip)
-#         push!(obj_opts, obj_opt)
-#         push!(theory_SGM, Lip_scaling*L*R*((1/2*s_last^2-N)*h + 1/(2(s_last^2*h))))
-#     end
-
-#     # exponent = (1 + 3 * p) / 2
-#     # ref_line = (obj_opts[1] * N_vals[1]^exponent) ./ (N_vals .^ exponent)
-
-#     # p_round = round(p, sigdigits = 6)
-#     # plt = plot(
-#     #     N_vals,
-#     #     obj_opts;
-#     #     label = "obj_opt",
-#     #     yaxis = :log,
-#     #     marker = :circle,
-#     #     xlabel = "N",
-#     #     ylabel = "objective",
-#     #     title = "PEP optimum vs N (log y), p = $p_round",
-#     #     legend = :topright,
-#     # )
-#     # plot!(
-#     #     plt,
-#     #     N_vals,
-#     #     ref_line;
-#     #     label = L"$\propto N^{-(1+3p)/2}$" * " (scaled)",
-#     #     linestyle = :dash,
-#     # )
-
-
-
-#     return N_vals, true_Lip, theory_SGM, true_BSD, obj_opts
-# end
-
-
 
 function optimize_δ_for_fixed_α_simple(
     N, L, α, R, p, zero_idx;
@@ -550,7 +332,7 @@ function optimize_δ_for_fixed_α_simple(
     xtol_rel=1e-6,
     show_trace=true,
     trace_interval=10,
-    algorithm=:LN_SBPLX,
+    algorithm=:LN_BOBYQA,
     show_output=:off,
     ϵ_tol_feas=1e-6,
     objective_type=:default,
@@ -633,7 +415,7 @@ function optimize_δ_for_fixed_α_simple(
     opt.min_objective = nlopt_obj
 
     # ── multi-start optimization ──────────────────────────────────────────────
-    n_restarts = 5
+    n_restarts = 10
     global_best_val = Inf
     global_best_u = zeros(n_vars)
 
@@ -682,6 +464,7 @@ function run_obj_vs_N_sweep_optimal(
     N_start::Int=2,
     N_stop::Int=10,
     N_step::Int=1,
+    N_opt_max::Int=5,
     zero_idx=[],
     show_trace::Bool=false,
     obj_val_upper_bound::Real=1e6,
@@ -698,7 +481,7 @@ function run_obj_vs_N_sweep_optimal(
         display("running N = " * string(N))
         α = make_α(N, L, R)
 
-        if N < 1
+        if N < N_opt_max
             obj_opt, _ = optimize_δ_for_fixed_α_simple(
                 N, β, α, R, p, zero_idx;
                 show_trace=show_trace,
@@ -713,7 +496,7 @@ function run_obj_vs_N_sweep_optimal(
 
         push!(obj_opts, obj_opt)
         push!(true_BSD, obj_opt_true_BS)
-        push!(minimax_rate_true, L * R / sqrt(2*(N + 1)))
+        push!(minimax_rate_true, β * R / sqrt(2*(N + 1)))
     end
 
     df = DataFrame(N=N_vals, delta_opt=obj_opts, bounded_subgrad=true_BSD, minimax_rate=minimax_rate_true)
@@ -733,11 +516,12 @@ L = 1.0
 R = 1.0
 p = 0.0 # DO NOT CHANGE
 N = 11
-Lip_scaling = 1.0
+Lip_scaling = 0.7071
 
-α_type = make_α_optimal_SG_step
-csv_path = string(α_type)* "_results_scaling_" * string(Lip_scaling) * ".csv"
-N_vals, obj_opts, true_BSD, minimax_rate_true = run_obj_vs_N_sweep_optimal(R, β, p, Lip_scaling, α_type; csv_path)
+α_type = make_α_ssep
+csv_path = "./Data and Plotting/" * string(α_type) * "_results_scaling_" * string(Lip_scaling) * ".csv"
+N_vals, obj_opts, true_BSD, minimax_rate_true = run_obj_vs_N_sweep_optimal(R, β, p, Lip_scaling, α_type; csv_path,
+                                                                            N_start = 2, N_stop = 50, N_step = 2, N_opt_max = 18)
 
 
 # α = make_α_ssep(N, β, R)
@@ -749,15 +533,3 @@ N_vals, obj_opts, true_BSD, minimax_rate_true = run_obj_vs_N_sweep_optimal(R, β
 
 
 
-
-# display(minimum(true_Lip ./ true_BSD))
-# display(maximum(true_Lip ./ true_BSD))
-
-
-#display(true_Lip ./ theory_SGM)                
-
-# # Single-N check (fast):
-# N = 5
-# α = make_α_gradient_descent(N, 2^(1-p)*L)
-# obj_opt, δ_set_opt, result = optimize_δ_for_fixed_α(N, L, α, R, p, []; show_trace = false)
-# obj, λ_opt, Z_opt = solve_dual_PEP_with_known_stepsizes(N, L, α, R, δ_set_opt, p, [])
