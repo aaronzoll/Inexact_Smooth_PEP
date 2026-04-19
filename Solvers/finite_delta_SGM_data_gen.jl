@@ -246,10 +246,10 @@ df = run_sweep_N_p_subgradient_avg(
     R            = 1.0,
     β            = 1.0,
     Lip_scaling  = 1.0,
-    N_start      = 2,
-    N_stop       = 22,
+    N_start      = 1,
+    N_stop       = 1,
     N_step       = 1,
     p_vals       = range(0.0, 1.0; length=5),   # 0.0, 0.1, …, 1.0
     show_trace   = false,
-    csv_path     = "./Data and Plotting/SGD_sweep_no_N_scaling_full.csv",
+    csv_path     = "./Data and Plotting/SGD_sweep_no_N_scaling_full_N_1.csv",
 )
